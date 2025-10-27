@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Web-Bible-Paragraph 3.1 · Sermon Editor</title>
+  <style>
+    :root{
+      --bg:#0f1115; --panel:#161922; --text:#e6e8ef; --muted:#9aa0ab;
+      --accent:#6ea8fe; --border:#252a36; --danger:#ff6b6b; --ok:#4ade80;
+      --titleBlue:#9fd0ff; --paper:#ffffff; --ink:#0f1115;
+    }
+    *{ box-sizing:border-box }
+    html,body{ height:100% }
+    body{
+      margin:0; font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans KR",sans-serif;
+      background:var(--bg); color:var(--text);
+      display:grid; grid-template-rows:64px 1fr; gap:10px;
+    }
+    header{
+      display:flex; align-items:center; gap:10px; padding:8px 12px;
+      background:var(--panel); border-bottom:1px solid var(--border);
+      position:sticky; top:0; z-index:10;
+    }
+    header h1{ font-size:16px; font-weight:600; color:var(--titleBlue); margin:0; }
+    main{ display:grid; grid-template-columns:360px 1fr; gap:10px; padding:0 10px 10px; }
+    .left{
+      background:var(--panel); border:1px solid var(--border); border-radius:12px; overflow:hidden;
+      display:flex; flex-direction:column; min-height:0;
+    }
+    .left h2{ margin:0; padding:12px; font-size:14px; border-bottom:1px solid var(--border); color:var(--muted) }
+    .paras{ overflow:auto; padding:8px; display:flex; flex-direction:column; gap:8px; }
+    .para{
+      background:#111522; border:1px solid var(--border); border-radius:10px; padding:10px;
+      display:grid; grid-template-columns:1fr auto; gap:8px; align-items:start;
+    }
+    .para .ref{ color:#b9c2d0; font-weight:600; margin-bottom:6px }
+    .para .text{ color:#dfe6f3; font-size:14px; line-height:1.5; }
+    .para .actions{ display:flex; gap:6px }
+    .btn{
+      background:#1d2333; border:1px solid var(--border); color:var(--text);
+      padding:6px 10px; border-radius:8px; cursor:pointer; font-size:12px;
+    }
+    .btn:hover{ border-color:#3a4258 }
+    .btn.primary{ background:#19314f; border-color:#2a4f81; color:#cfe6ff }
+    .btn.danger{ background:#3a1820; border-color:#6b1c2b; color:#ffc7cf }
+
+    /* Popup Editor (window-like) */
+    dialog#editor{ width:min(1100px, 92vw); max-height:90vh; padding:0; border:none; border-radius:14px; overflow:hidden; }
+    .ed-wrap{ display:grid; grid-template-rows:56px 1fr 52px; height:90vh; background:var(--panel); color:var(--text); }
+    .ed-head{
+      display:flex; align-items:center; gap:8px; padding:8px 10px; border-bottom:1px solid var(--border);
+      position:sticky; top:0; background:var(--panel); z-index:5;
+    }
+    .ed-title{
+      display:flex; flex-direction:column; gap:4px; min-width:220px;
+    }
+    .ed-title small{ color:var(--muted); font-size:11px; }
+    .ed-title input{
+      width:240px; /* 제목란 너비를 줄임 */
+      background:#101522; color:var(--text); border:1px solid var(--border);
+      border-radius:8px; padding:6px 8px; font-size:14px; text-align:left; /* 왼쪽 정렬 */
+    }
+    .ed-toolbar{ display:flex; flex-wrap:wrap; gap:6px; margin-left:auto }
+    .tbtn{ border:1px solid var(--border); background:#0f1420; color:var(--text); padding:6px 9px; border-radius:8px; font-size:12px; cursor:pointer }
+    .tbtn[data-active="1"]{ outline:2px solid var(--accent) }
+
+    .ed-body{ overflow:auto; padding:12px; background:#0e111a }
+    .paper{ background:var(--paper); color:var(--ink); border-radius:12px; padding:18px 18px 60px; min-height:760px; max-width:860px; margin:0 auto; }
+    .paper:focus{ outline:2px solid var(--accent) }
+    .paper h2{ margin:12px 0 6px 0 }
+    .paper .verse{ font-style:italic; background:#fffbe6; padding:2px 4px; border-radius:6px }
+    .paper .mark{ background:#ffeaa7 }
+
+    .ed-foot{
+      border-top:1px solid var(--border); display:flex; align-items:center; gap:8px; padding:6px 10px;
+      position:sticky; bottom:0; background:var(--panel); z-index:5;
+    }
+    .stats{ color:var(--muted); font-size:12px; margin-right:auto }
+
+    .ed-foot .btn{ padding:8px 12px }
+
+    /* Print (A4) */
+    @media print{
+      body{ background:white }
+      dialog#editor { width:auto; height:auto; }
+      .ed-wrap{ display:block }
+      .ed-head, .ed-foot{ display:none }
+      .paper{ box-shadow:none; border:none; max-width:none; width:210mm; min-height:297mm; padding:20mm }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Web‑Bible‑Paragraph 3.1 · Sermon Editor</h1>
+    <span style="color:var(--muted); font-size:12px">샘플 데이터 · 좌측 단락에서 <b>설교</b>를 눌러 편집</span>
+  </header>
+
+  <main>
+    <section class="left">
+      <h2>성경 단락</h2>
+      <div class="paras" id="paraList"></div>
+    </section>
+
+    <section class="right" style="display:flex; align-items:center; justify-content:center; color:var(--muted)">
+      <div>
+        <div style="font-size:20px; color:#cfe1ff; text-align:center; margin-bottom:8px">Sermon Editor 3.1</div>
+        <div style="text-align:center">좌측에서 단락을 선택하여 설교 편집을 시작하세요.</div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Editor Dialog -->
+  <dialog id="editor">
+    <div class="ed-wrap">
+      <div class="ed-head">
+        <div class="ed-title">
+          <small id="autoSaveBadge">자동저장됨</small>
+          <input id="titleInput" placeholder="설교 제목" />
+        </div>
+        <div class="ed-toolbar" id="toolbar">
+          <button class="tbtn" data-cmd="undo" title="되돌리기 (Ctrl+Z)">↶</button>
+          <button class="tbtn" data-cmd="redo" title="다시하기 (Ctrl+Y)">↷</button>
+          <button class="tbtn" data-cmd="bold" title="굵게 (Ctrl+B)"><b>B</b></button>
+          <button class="tbtn" data-cmd="italic" title="기울임 (Ctrl+I)"><i>I</i></button>
+          <button class="tbtn" data-cmd="underline" title="밑줄 (Ctrl+U)"><u>U</u></button>
+          <button class="tbtn" data-cmd="strikeThrough" title="취소선"><s>S</s></button>
+          <button class="tbtn" data-cmd="formatBlock" data-value="H2" title="소제목">H2</button>
+          <button class="tbtn" data-cmd="insertUnorderedList" title="불릿 목록">• List</button>
+          <button class="tbtn" data-cmd="insertOrderedList" title="번호 목록">1. List</button>
+          <button class="tbtn" id="quoteBtn" title="인용">“ ”</button>
+          <button class="tbtn" id="codeBtn" title="인라인 코드">{ }</button>
+          <button class="tbtn" id="markBtn" title="하이라이트">✺</button>
+          <button class="tbtn" id="linkBtn" title="링크">🔗</button>
+          <button class="tbtn" id="clearBtn" title="서식 초기화">CLR</button>
+          <button class="tbtn" id="findBtn" title="찾기/바꾸기">F/R</button>
+        </div>
+      </div>
+
+      <div class="ed-body">
+        <div class="paper" id="paper" contenteditable="true" spellcheck="false"></div>
+      </div>
+
+      <div class="ed-foot">
+        <div class="stats" id="stats">0자 · 0단락</div>
+        <button class="btn" id="exportBtn">내보내기 (.sermon.json)</button>
+        <label class="btn" for="importFile">가져오기<input id="importFile" type="file" accept="application/json" style="display:none"/></label>
+        <button class="btn" id="printBtn">인쇄(A4)</button>
+        <button class="btn danger" id="closeBtn">닫기(Esc)</button>
+      </div>
+    </div>
+  </dialog>
+
+  <script>
+    // -----------------------------
+    // 샘플 데이터 (책/장/단락)
+    // -----------------------------
+    const BIBLE = {
+      book: '역대하', chap: 32,
+      paras: [
+        { id:'2Chr-32-1', ref:'역대하 32:1-8', text:'이 일 후에 앗수르 왕 산헤립이 와서 유다에 들어와 모든 견고한 성을 대치하고 점령하려 하니라…' },
+        { id:'2Chr-32-9', ref:'역대하 32:9-15', text:'그 때에 앗수르 왕 산헤립이 그의 신복들을 예루살렘으로 보내어 히스기야와 유다 모든 사람을 치욕되게 하며…' },
+        { id:'2Chr-32-20', ref:'역대하 32:20-23', text:'이사야 선지자와 히스기야 왕이 하늘을 향하여 부르짖어 기도하였더니…' },
+      ]
+    }
+
+    // -----------------------------
+    // 로컬 저장 유틸
+    // -----------------------------
+    function LS_KEY(pid){ return `WBP-3.1:sermon:${pid}` }
+    function loadSermon(pid){
+      try{ const raw = localStorage.getItem(LS_KEY(pid)); return raw ? JSON.parse(raw) : null }catch(e){ return null }
+    }
+    function saveSermon(pid, data){ localStorage.setItem(LS_KEY(pid), JSON.stringify(data)) }
+
+    // -----------------------------
+    // UI: 좌측 단락 목록
+    // -----------------------------
+    const paraList = document.getElementById('paraList');
+    BIBLE.paras.forEach(p => {
+      const $ = document.createElement('div'); $.className='para'; $.dataset.pid=p.id;
+      $.innerHTML = `
+        <div>
+          <div class="ref">${p.ref}</div>
+          <div class="text">${p.text}</div>
+        </div>
+        <div class="actions">
+          <button class="btn primary" data-action="edit">설교</button>
+          <button class="btn" data-action="preview">미리보기</button>
+          <button class="btn" data-action="clear">초기화</button>
+        </div>`;
+      paraList.appendChild($);
+    });
+
+    paraList.addEventListener('click', (e)=>{
+      const btn = e.target.closest('button'); if(!btn) return;
+      const host = e.target.closest('.para'); const pid = host.dataset.pid;
+      if(btn.dataset.action==='edit') openSermonEditor(pid);
+      if(btn.dataset.action==='preview') previewSermon(pid);
+      if(btn.dataset.action==='clear') { if(confirm('이 단락 설교를 초기화할까요?')) { localStorage.removeItem(LS_KEY(pid)); alert('초기화되었습니다.'); } }
+    });
+
+    function previewSermon(pid){
+      const s = loadSermon(pid);
+      alert(s ? `제목: ${s.title || ''}\n\n${s.html.replace(/<[^>]+>/g,'\n').slice(0,400)}...` : '저장된 설교가 없습니다.');
+    }
+
+    // -----------------------------
+    // Editor 상태
+    // -----------------------------
+    let CURRENT_PID = null;
+    const editor = document.getElementById('editor');
+    const titleInput = document.getElementById('titleInput');
+    const paper = document.getElementById('paper');
+    const autoBadge = document.getElementById('autoSaveBadge');
+    const stats = document.getElementById('stats');
+
+    function openSermonEditor(pid){
+      CURRENT_PID = pid;
+      const stored = loadSermon(pid);
+      titleInput.value = stored?.title || '';
+      paper.innerHTML = stored?.html || defaultTemplateFor(pid);
+      touchSaved();
+      updateStats();
+      if(!editor.open) editor.showModal();
+      paper.focus();
+    }
+
+    function defaultTemplateFor(pid){
+      const ref = BIBLE.paras.find(p=>p.id===pid)?.ref || '';
+      return `
+        <h2>${ref} – 설교 노트</h2>
+        <p class="verse">본문 인용을 붙여넣고, 자동으로 <span class="mark">하이라이트</span>나 <em>기울임</em> 표시를 사용할 수 있어요.</p>
+        <p>① 서론 — 본문 맥락과 문제 제기</p>
+        <p>② 본론 — 주제 1</p>
+        <p>③ 본론 — 주제 2</p>
+        <p>④ 결론 — 적용과 결단</p>
+      `;
+    }
+
+    // -----------------------------
+    // Toolbar 동작 (document.execCommand 기반 간단 구현)
+    // -----------------------------
+    const toolbar = document.getElementById('toolbar');
+    toolbar.addEventListener('click', (e)=>{
+      const b = e.target.closest('.tbtn'); if(!b) return;
+      const cmd = b.dataset.cmd; const val = b.dataset.value || null;
+      paper.focus();
+      if(cmd){ document.execCommand(cmd, false, val); syncActiveStates(); scheduleSave(); updateStats(); return }
+    });
+
+    // 추가 버튼: 인용/코드/마크/링크/클리어/찾기바꾸기
+    document.getElementById('quoteBtn').onclick = ()=>{ surroundSelection('<blockquote>','</blockquote>') }
+    document.getElementById('codeBtn').onclick  = ()=>{ surroundSelection('<code>','</code>') }
+    document.getElementById('markBtn').onclick  = ()=>{ surroundSelection('<span class="mark">','</span>') }
+    document.getElementById('linkBtn').onclick  = ()=>{
+      const url = prompt('링크 URL을 입력하세요:'); if(!url) return;
+      document.execCommand('createLink', false, url); scheduleSave();
+    }
+    document.getElementById('clearBtn').onclick = ()=>{
+      const n = getSelectionHtml();
+      if(!n) return; const tmp = n.replace(/<[^>]+>/g,'');
+      replaceSelectionWithHtml(tmp); scheduleSave(); updateStats();
+    }
+    document.getElementById('findBtn').onclick = ()=>{ openFindReplace() }
+
+    function surroundSelection(before, after){
+      const html = getSelectionHtml(); if(!html) return;
+      replaceSelectionWithHtml(before + html + after); scheduleSave(); updateStats();
+    }
+
+    function getSelectionHtml(){
+      const sel = window.getSelection(); if(!sel || sel.rangeCount===0) return '';
+      const range = sel.getRangeAt(0);
+      const frag = range.cloneContents(); const div = document.createElement('div');
+      div.appendChild(frag); return div.innerHTML;
+    }
+    function replaceSelectionWithHtml(html){
+      document.execCommand('insertHTML', false, html);
+    }
+
+    function syncActiveStates(){
+      // 간단한 active UI (선택적)
+    }
+
+    // -----------------------------
+    // 저장 (디바운스)
+    // -----------------------------
+    let saveTimer = null;
+    function scheduleSave(){
+      markDirty();
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(doSave, 500);
+    }
+    function doSave(){
+      if(!CURRENT_PID) return;
+      const data = { title: titleInput.value.trim(), html: paper.innerHTML, ts: Date.now() };
+      saveSermon(CURRENT_PID, data);
+      touchSaved();
+    }
+    function markDirty(){ autoBadge.textContent = '저장 중…'; autoBadge.style.color = '#ffd38b' }
+    function touchSaved(){ autoBadge.textContent = '자동저장됨'; autoBadge.style.color = 'var(--muted)' }
+
+    titleInput.addEventListener('input', scheduleSave);
+    paper.addEventListener('input', ()=>{ scheduleSave(); updateStats(); });
+
+    // -----------------------------
+    // 통계
+    // -----------------------------
+    function updateStats(){
+      const text = paper.innerText || '';
+      const chars = text.replace(/\s/g,'').length;
+      const paras = (paper.querySelectorAll('p, h1, h2, h3, blockquote, li').length) || 0;
+      stats.textContent = `${chars}자 · ${paras}단락`;
+    }
+
+    // -----------------------------
+    // 내보내기/가져오기/인쇄/닫기
+    // -----------------------------
+    document.getElementById('exportBtn').onclick = ()=>{
+      if(!CURRENT_PID) return;
+      const payload = { pid: CURRENT_PID, title: titleInput.value.trim(), html: paper.innerHTML };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type:'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href=url; a.download=`${CURRENT_PID}.sermon.json`; a.click();
+      URL.revokeObjectURL(url);
+    }
+    document.getElementById('importFile').onchange = (e)=>{
+      const f = e.target.files?.[0]; if(!f) return; const r = new FileReader();
+      r.onload = ()=>{ try{ const j = JSON.parse(r.result);
+          if(j && j.pid && j.html!==undefined){ CURRENT_PID = j.pid; titleInput.value = j.title||''; paper.innerHTML=j.html; doSave(); updateStats(); }
+        }catch(err){ alert('JSON 파싱 오류'); } };
+      r.readAsText(f);
+    }
+    document.getElementById('printBtn').onclick = ()=>{ window.print() }
+    document.getElementById('closeBtn').onclick = ()=>{ editor.close() }
+
+    editor.addEventListener('close', ()=>{ CURRENT_PID=null })
+    document.addEventListener('keydown', (e)=>{ if(e.key==='Escape' && editor.open) editor.close() })
+
+    // -----------------------------
+    // 간단한 찾기/바꾸기
+    // -----------------------------
+    function openFindReplace(){
+      const kw = prompt('찾을 단어?'); if(!kw) return;
+      const repl = prompt('바꿀 내용(취소 시 찾기만)');
+      if(repl===null){
+        // 찾기: 첫 매치로 스크롤
+        const rx = new RegExp(kw.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'i');
+        const walker = document.createTreeWalker(paper, NodeFilter.SHOW_TEXT);
+        let node; while(node=walker.nextNode()){ if(rx.test(node.nodeValue)){
+          const range = document.createRange();
+          const idx = node.nodeValue.toLowerCase().indexOf(kw.toLowerCase());
+          range.setStart(node, Math.max(0, idx)); range.setEnd(node, Math.max(0, idx+kw.length));
+          const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);
+          paper.focus(); paper.scrollIntoView({behavior:'smooth', block:'center'}); break;
+        }}
+      }else{
+        paper.innerHTML = paper.innerHTML.replaceAll(kw, repl); scheduleSave(); updateStats();
+      }
+    }
+
+    // -----------------------------
+    // 단락 더블클릭으로 바로 편집
+    // -----------------------------
+    paraList.addEventListener('dblclick', (e)=>{
+      const host = e.target.closest('.para'); if(host) openSermonEditor(host.dataset.pid)
+    });
+  </script>
+</body>
+</html>
