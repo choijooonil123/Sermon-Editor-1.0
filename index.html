@@ -502,19 +502,54 @@
     const voiceSel = $('#voiceSel');
     const rate = $('#rate'); const rateVal = $('#rateVal']);
 
-    function populateVoices(){
-      const vs = synth.getVoices();
+    // 음성 로드 대기 유틸
+    function awaitVoices(timeout=1500){
+      return new Promise(resolve=>{
+        const vs = synth.getVoices();
+        if (vs && vs.length) return resolve(vs);
+        const t = setTimeout(()=> resolve(synth.getVoices()), timeout);
+        speechSynthesis.onvoiceschanged = ()=>{
+          clearTimeout(t);
+          resolve(synth.getVoices());
+        };
+      });
+    }
+
+    async function populateVoices(){
+      const vs = await awaitVoices();
       voiceSel.innerHTML='';
+      if (!vs || !vs.length){
+        const opt = document.createElement('option');
+        opt.value = ''; opt.textContent = '음성을 찾을 수 없음';
+        voiceSel.append(opt);
+        return;
+      }
       vs.forEach((v)=>{
         const opt = document.createElement('option');
         opt.value = v.name; opt.textContent = `${v.name} (${v.lang})`;
-        if(v.lang.startsWith('ko')) opt.selected = true;
         voiceSel.append(opt);
       });
-      if(!voiceSel.value && vs[0]) voiceSel.value = vs[0].name;
+      // 선호: ko → en → 첫 번째
+      const prefer = vs.find(v=>/^ko/i.test(v.lang)) || vs.find(v=>/^en/i.test(v.lang)) || vs[0];
+      if (prefer) voiceSel.value = prefer.name;
     }
     populateVoices();
-    if (typeof speechSynthesis !== 'undefined') speechSynthesis.onvoiceschanged = populateVoices;
+
+    voiceSel.addEventListener('change', ()=>{
+      if (!sentences.length) return;
+      if (autoplay) speakCurrent(); // 현재 문장부터 새 목소리로 이어서
+    });
+
+    // 첫 사용자 제스처에서 오디오 잠금 해제
+    let audioUnlocked = false;
+    function unlockAudio(){
+      if (audioUnlocked) return;
+      try { speechSynthesis.resume(); } catch {}
+      audioUnlocked = true;
+    }
+    ['click','keydown','touchstart'].forEach(ev=>{
+      window.addEventListener(ev, unlockAudio, { once:true, passive:true });
+    });
 
     rate.addEventListener('input', ()=>{ rateVal.textContent = Number(rate.value).toFixed(2)+'×'; });
 
@@ -560,817 +595,45 @@
       const s = sentences[curIdx];
       sentences.forEach(x=>x.classList.remove('current'));
       s.classList.add('current'); s.scrollIntoView({behavior:'smooth', block:'center'});
+
       const u = new SpeechSynthesisUtterance(s.textContent.trim());
-      const vv = synth.getVoices().find(v=>v.name===voiceSel.value);
-      if(vv) u.voice = vv; u.rate = Number(rate.value)||1;
+
+      // 음성 선택 안전화
+      const voices = synth.getVoices();
+      let vv = voices.find(v=>v.name===voiceSel.value);
+      if (!vv) vv = voices.find(v=>/^ko/i.test(v.lang)) || voices[0];
+      if (vv) u.voice = vv;
+
+      // 언어 지정 (없으면 ko-KR 선호)
+      u.lang = (vv && vv.lang) ? vv.lang : 'ko-KR';
+
+      u.rate = Number(rate.value)||1;
       u.onend = ()=>{ if(autoplay){ next(); } };
-      u.onerror = ()=>{ autoplay=false; };
-      synth.cancel(); synth.speak(u);
+      u.onerror = (e)=>{ autoplay=false; console.warn('TTS error', e); };
+
+      // iOS/일부 브라우저에서 queue 누적 방지
+      try { synth.cancel(); } catch {}
+      try { synth.speak(u); } catch (e) {
+        console.warn('speak failed, retrying once', e);
+        setTimeout(()=> { try { synth.speak(u); } catch{} }, 120);
+      }
     }
+
 
     function startAt(i=0){ wrapSentences(); curIdx = Math.max(0, Math.min(i, sentences.length-1)); autoplay=true; speakCurrent(); updateTtsBtn(); }
     function stopAll(){ autoplay=false; synth.cancel(); updateTtsBtn(); sentences.forEach(x=>x.classList.remove('current')); }
     function next(){ if(curIdx < sentences.length-1){ curIdx++; speakCurrent(); } else { stopAll(); } }
     function prev(){ if(curIdx>0){ curIdx--; speakCurrent(); } }
 
-    $('#ttsToggle').onclick = ()=>{ if(autoplay){ stopAll(); } else { startAt(curIdx||0); } };
-    $('#ttsNext').onclick = ()=> next();
-    $('#ttsPrev').onclick = ()=> prev();
-    $('#ttsStop').onclick = ()=> stopAll();
-    function updateTtsBtn(){ $('#ttsToggle').textContent = autoplay ? '⏸ 일시정지' : '▶︎ 재생'; }
-
-    content.addEventListener('click', (e)=>{
-      const sent = e.target.closest('.sent');
-      if(sent){ const idx = sentences.indexOf(sent); if(idx>=0){ curIdx=idx; if(!autoplay) speakCurrent(); } }
-    });
-
-    content.addEventListener('input', ()=>{ SENT_WRAPPED=false; sentences=[]; });
-
-    // ====== 성경 데이터 로딩 (bible.json) ======
-    const BIBLE_CACHE_KEY = 'sermon_editor_bible_json';
-    const bibleStatus = $('#bibleStatus');
-    const bibleLoadBtn = $('#bibleLoadBtn');
-    const bibleFile = $('#bibleFile');
-
-    function setBibleStatus(txt){ if(bibleStatus) bibleStatus.textContent = txt; }
-
-    function loadBibleFromCache(){
-      const raw = localStorage.getItem(BIBLE_CACHE_KEY);
-      if(!raw) return false;
-      try{ window.BIBLE = JSON.parse(raw); setBibleStatus('로컬 캐시 사용'); return true; }catch{ return false; }
-    }
-    async function fetchBibleDefault(){
-      try{
-        const resp = await fetch('bible.json', {cache:'reload'});
-        if(!resp.ok) return false;
-        const json = await resp.json();
-        window.BIBLE = json; localStorage.setItem(BIBLE_CACHE_KEY, JSON.stringify(json));
-        setBibleStatus('자동 로드 성공');
-        return true;
-      }catch{ return false; }
-    }
-    function handleBibleFile(file){
-      if(!file) return;
-      const fr = new FileReader();
-      fr.onload = ()=>{
-        try{
-          const json = JSON.parse(fr.result);
-          window.BIBLE = json;
-          localStorage.setItem(BIBLE_CACHE_KEY, fr.result);
-          setBibleStatus('파일 로드 성공');
-        }catch{
-          alert('JSON 파싱 실패: 파일을 확인하세요');
-        }
-      };
-      fr.readAsText(file,'utf-8');
-    }
-    if(bibleLoadBtn){ bibleLoadBtn.addEventListener('click', ()=> bibleFile.click()); }
-    if(bibleFile){ bibleFile.addEventListener('change', (e)=> handleBibleFile(e.target.files[0])); }
-
-    (async function initBible(){
-      if(loadBibleFromCache()) return;
-      if(await fetchBibleDefault()) return;
-      setBibleStatus('미로딩');
-    })();
-
-    // 구절 파서 & 조회기
-    function normalizeBook(name){
-      if(!window.BIBLE) return null;
-      const keys = Object.keys(window.BIBLE);
-      if(keys.includes(name)) return name;
-      const hit = keys.find(k=>k.startsWith(name)); // 접두 일치(창 → 창세기)
-      return hit || null;
-    }
-    function parseRef(str){
-      if(!str) return null;
-      const m = str.replace(/\s+/g,'').match(/^([^\d:]+)(\d+)(?::(\d+)(?:-(\d+))?)?$/);
-      if(!m) return null;
-      const bookRaw=m[1], chap=m[2], v1=m[3]||null, v2=m[4]||null;
-      const book = normalizeBook(bookRaw);
-      if(!book) return null;
-      return {
-        book,
-        chap:String(parseInt(chap,10)),
-        v1: v1? String(parseInt(v1,10)) : null,
-        v2: v2? String(parseInt(v2,10)) : null
-      };
-    }
-    function getVerseTextFromBible(refStr, opt={includeNum:true}){
-      if(!window.BIBLE) return '';
-      const p = parseRef(refStr);
-      if(!p) return '';
-      const {book, chap, v1, v2} = p;
-      const ch = window.BIBLE[book] && window.BIBLE[book][chap];
-      if(!ch) return '';
-      const start = v1? parseInt(v1,10) : 1;
-      const end   = v2? parseInt(v2,10) : (v1? start : start);
-      const out=[];
-      for(let i=start;i<=end;i++){
-        const t = ch[String(i)];
-        if(!t) continue;
-        out.push(opt.includeNum? `${i}. ${t}` : t);
+    $('#ttsToggle').onclick = ()=>{
+      if (autoplay){ stopAll(); }
+      else {
+        wrapSentences();               // 보강: 먼저 래핑 보장
+        if (!sentences.length){ alert('낭독할 문장이 없습니다. 본문을 입력하세요.'); return; }
+        startAt(curIdx||0);
       }
-      return out.join(' ');
-    }
-
-    // ====== 드래프트 자동저장 보조 ======
-    window.addEventListener('beforeunload', (e)=>{ if(dirty){ saveNow(); } });
-
-    // ====== 설교추적 (ASR: 음성 인식으로 현재 문장 진행률/자동 이동) ======
-    (function(){
-      const asrSupported = ('webkitSpeechRecognition' in window) || ('SpeechRecognition' in window);
-      let recognizer = null; let micOn = false; let partialText = '';
-
-      function norm(s){
-        return (s||'')
-          .replace(/[.,!?;:"'()\[\]{}]/g,' ')
-          .replace(/\s+/g,' ')
-          .trim()
-          .toLowerCase();
-      }
-      function coverage(spoken, target){
-        const a = norm(spoken).split(' ').filter(Boolean);
-        const b = norm(target).split(' ').filter(Boolean);
-        if(!a.length || !b.length) return 0;
-        let i=0, hit=0;
-        for(const w of a){
-          if(i<b.length && w===b[i]){ hit++; i++; }
-          else{
-            const pos = b.indexOf(w, i);
-            if(pos>=0){ i = pos+1; hit++; }
-          }
-        }
-        return hit / b.length;
-      }
-      function updatePartialFill(pct){
-        const s = sentences && sentences[curIdx]; if(!s) return;
-        s.style.setProperty('--asrPct', Math.max(0, Math.min(100, Math.round(pct*100))) + '%');
-        s.classList.toggle('asr-part', pct>0);
-      }
-      function ensureRecognizer(){
-        const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-        const r = new SR();
-        r.lang = 'ko-KR';
-        r.interimResults = true;
-        r.continuous = true;
-        r.maxAlternatives = 1;
-
-        r.onresult = (ev)=>{
-          let interim = '', final='';
-          for(let i=ev.resultIndex; i<ev.results.length; i++){
-            const res = ev.results[i];
-            if(res.isFinal) final += ' ' + res[0].transcript; else interim += ' ' + res[0].transcript;
-          }
-          if(final){ partialText += ' ' + final; }
-          const spoken = (partialText + ' ' + interim).trim();
-          const sEl = sentences && sentences[curIdx];
-          if(!sEl) return;
-
-          const cov = coverage(spoken, sEl.textContent);
-          updatePartialFill(cov);
-          if(cov >= 0.9){ partialText=''; next(); }
-        };
-        r.onerror = (e)=>{
-          const st=$('#asrState'); if(st) st.textContent = '오류: ' + (e.error||'unknown');
-          document.body.classList.add('asr-error');
-        };
-        r.onend = ()=>{ if(micOn){ try{ r.start(); }catch{} } };
-        return r;
-      }
-      function setAsrState(txt){ const st=$('#asrState'); if(st) st.textContent = txt; }
-      function startMic(){
-        if(!asrSupported){ alert('이 브라우저는 음성 인식을 지원하지 않습니다. (Chrome 권장)'); return; }
-        wrapSentences(); if(!sentences || !sentences.length){ alert('읽을 문장이 없습니다.'); return; }
-        if(!recognizer) recognizer = ensureRecognizer();
-        try{ recognizer.start(); }catch{}
-        micOn = true; document.body.classList.add('asr-on');
-        const btn=$('#micToggle'); if(btn) btn.textContent='🛑 설교추적 정지'; setAsrState('듣는 중…');
-        if(!sentences[curIdx]) curIdx = 0; speakCurrent();
-      }
-      function stopMic(){
-        micOn = false; partialText='';
-        document.body.classList.remove('asr-on');
-        if(recognizer){ try{ recognizer.stop(); }catch{} }
-        const btn=$('#micToggle'); if(btn) btn.textContent='🎙 설교추적 시작'; setAsrState('마이크 꺼짐');
-        updatePartialFill(0);
-      }
-      const micBtn = $('#micToggle');
-      if(micBtn){ micBtn.addEventListener('click', ()=>{ micOn ? stopMic() : startMic(); }); }
-
-      // 문장 이동 시 진행도 초기화
-      const _origSpeak = speakCurrent;
-      window.speakCurrent = function(){ updatePartialFill(0); partialText=''; _origSpeak(); };
-
-      // 편집 중 구조 변경되면 진행 표시 리셋
-      content.addEventListener('input', ()=>{ if(micOn){ partialText=''; updatePartialFill(0); } });
-    })();
-
-    // ====== 본문 삽입 다이얼로그 ======
-    const passageDlg = $('#passageDlg');
-    $('#insertPassage').onclick = ()=>passageDlg.showModal();
-    $('#dlgCancel').onclick = (e)=>{ e.preventDefault(); passageDlg.close(); };
-    $('#dlgInsert').onclick = (e)=>{
-      e.preventDefault();
-      const text = $('#passageText').value || '';
-      const asVerse = $('#asVerse').checked;
-      const autoMark = $('#autoMark').checked;
-      if(!text.trim()) { passageDlg.close(); return; }
-      const frag = document.createDocumentFragment();
-      text.split(/\n+/).forEach(line=>{
-        if(!line.trim()) return;
-        const p = document.createElement('p');
-        let html = escapeHtml(line);
-        if(autoMark) html = html.replace(/\[(.+?)\]/g, '<span class="mark">$1</span>');
-        p.innerHTML = asVerse ? `<span class="verse">${html}</span>` : html;
-        frag.appendChild(p);
-      });
-      insertNodeAtCaret(frag);
-      passageDlg.close();
-      $('#passageText').value='';
-      saveSoon();
     };
 
-    function escapeHtml(s){return s.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;')}
-
-  </script>
-</body>
-</html>
-<!DOCTYPE html>
-<html lang="ko" data-theme="dark">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Sermon-Editor-1.0</title>
-  <style>
-    :root{
-      --bg:#0f1115; --panel:#161922; --panel-2:#141824; --text:#e6e8ef; --muted:#9aa0ab;
-      --accent:#6ea8fe; --border:#252a36; --danger:#ff6b6b; --ok:#4dd4ac; --warn:#ffd166;
-      --verse-bg: rgba(110,168,254,.12); --mark-bg: rgba(255,230,0,.22);
-    }
-    [data-theme="light"]{
-      --bg:#f7f8fb; --panel:#ffffff; --panel-2:#f0f3f9; --text:#0f1220; --muted:#6b7280;
-      --accent:#3b82f6; --border:#e5e7eb; --danger:#ef4444; --ok:#10b981; --warn:#eab308;
-      --verse-bg: rgba(59,130,246,.12); --mark-bg: rgba(250,204,21,.25);
-    }
-    *{box-sizing:border-box}
-    html,body{height:100%}
-    body{
-      margin:0; background:var(--bg); color:var(--text);
-      font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans KR",sans-serif;
-      display:grid; grid-template-rows:56px auto 40px; gap:10px;
-    }
-    header{
-      display:flex; align-items:center; gap:8px; padding:8px 10px;
-      background:var(--panel); border-bottom:1px solid var(--border);
-      position:sticky; top:0; z-index:20;
-    }
-    .brand{font-weight:700; letter-spacing:.2px}
-    .sep{flex:1}
-    .btn{appearance:none; border:1px solid var(--border); background:var(--panel-2); color:var(--text);
-      padding:6px 10px; border-radius:10px; cursor:pointer; font-size:14px}
-    .btn:hover{outline:1px solid var(--accent)}
-    .btn.ghost{background:transparent}
-    .btn.ok{border-color:transparent; background:var(--ok); color:#08261d}
-    .btn.danger{border-color:var(--danger); color:var(--danger); background:transparent}
-
-    .toolbar{display:flex; gap:6px; flex-wrap:wrap}
-
-    main{display:grid; grid-template-columns:320px 1fr; gap:10px; padding:0 10px}
-    aside{
-      background:var(--panel); border:1px solid var(--border); border-radius:14px; padding:10px;
-      display:flex; flex-direction:column; gap:10px; min-height:calc(100vh - 56px - 40px - 20px);
-      position:sticky; top:66px; height:fit-content;
-    }
-    .card{background:var(--panel); border:1px solid var(--border); border-radius:14px; padding:12px}
-
-    .field{display:flex; flex-direction:column; gap:6px}
-    .field label{font-size:12px; color:var(--muted)}
-    .input, select{
-      width:100%; padding:8px 10px; border-radius:12px; border:1px solid var(--border);
-      background:var(--panel-2); color:var(--text); font-size:15px
-    }
-
-    .editor-wrap{display:flex; flex-direction:column; gap:10px}
-    #title{font-size:24px; font-weight:700; padding:8px 12px}
-    #content{
-      min-height:60vh; padding:16px; border:1px solid var(--border); border-radius:16px;
-      background:var(--panel); line-height:1.7; font-size:18px;
-    }
-    #content:focus{outline:2px solid var(--accent)}
-
-    /* Notion 스타일 텍스트 요소 */
-    #content h1{font-size:1.8em; margin:.8em 0 .4em}
-    #content h2{font-size:1.5em; margin:.8em 0 .4em}
-    #content h3{font-size:1.25em; margin:.8em 0 .4em}
-    #content blockquote{border-left:4px solid var(--accent); margin:8px 0; padding:6px 10px; background:var(--panel-2)}
-    #content ul{padding-left:1.2em}
-    #content .toggle{border:1px dashed var(--border); border-radius:10px; padding:10px; margin:8px 0}
-    #content .toggle > summary{cursor:pointer; list-style:none; font-weight:600}
-    #content .toggle > summary::marker{display:none}
-    #content .toggle[open]{background:var(--panel-2)}
-
-    /* 하이라이트 규칙 */
-    #content .verse{background:var(--verse-bg); font-style:italic}
-    #content .mark{background:var(--mark-bg); padding:0 .15em; border-radius:.25em}
-
-    /* 페이지 나눔 */
-    .page-break{border:0; border-top:2px dashed var(--border); margin:20px 0;}
-    @media print{
-      header, aside, footer{display:none !important}
-      main{grid-template-columns:1fr}
-      #content{background:#fff; color:#000; border:0}
-      .page-break{page-break-before:always; border:0; height:0}
-      body{background:#fff}
-    }
-
-    /* 저장 목록 */
-    .list{display:flex; flex-direction:column; gap:6px; max-height:40vh; overflow:auto}
-    .list-item{display:flex; gap:6px; align-items:center; justify-content:space-between; border:1px solid var(--border); border-radius:10px; padding:8px 10px}
-    .row{display:flex; gap:6px; align-items:center}
-    .sub{font-size:12px; color:var(--muted)}
-
-    /* 툴팁/도움말 */
-    .hint{font-size:12px; color:var(--muted)}
-
-    footer{display:flex; align-items:center; gap:10px; padding:6px 10px; border-top:1px solid var(--border); background:var(--panel)}
-    #status{font-size:12px; color:var(--muted)}
-
-    .badge{display:inline-flex; align-items:center; gap:6px; padding:4px 8px; border-radius:999px; border:1px solid var(--border); background:var(--panel-2); font-size:12px}
-    .kbd{font-family:ui-monospace, Menlo, Consolas, monospace; padding:.1em .4em; border:1px solid var(--border); border-radius:6px}
-
-    /* 현재 문장 하이라이트 */
-    #content .sent{transition:background .2s ease}
-    #content .sent.current{background:rgba(111,207,151,.22); border-radius:.25em}
-
-    /* 설교추적(음성) 상태/진행률 */
-    .asr-on .badge, .asr-on #asrState{ color:#0a513a }
-    .asr-on #content .sent.current{ background:rgba(77,212,172,.28) }
-    .asr-part{ background:linear-gradient(90deg, rgba(77,212,172,.28) var(--asrPct,0%), transparent 0%) }
-    .asr-error{ outline:1px dashed var(--danger) }
-  </style>
-</head>
-<body>
-  <header>
-    <div class="brand">📝 Sermon-Editor-1.0</div>
-    <span class="sep"></span>
-    <div class="toolbar" aria-label="Formatting toolbar">
-      <select id="blockType" title="전환 (블록 유형)">
-        <option value="p">텍스트</option>
-        <option value="h1">제목1</option>
-        <option value="h2">제목2</option>
-        <option value="h3">제목3</option>
-        <option value="ul">글머리 기호 목록</option>
-        <option value="toggle">토글목록</option>
-        <option value="page">페이지 나눔</option>
-      </select>
-      <button class="btn" id="bold" title="굵게 (Ctrl+B)"><b>B</b></button>
-      <button class="btn" id="italic" title="기울임 (Ctrl+I)"><i>I</i></button>
-      <button class="btn" id="underline" title="밑줄 (Ctrl+U)"><u>U</u></button>
-      <input type="color" id="color" title="글자색" />
-      <button class="btn" id="quote" title="인용문">❝ 인용</button>
-      <button class="btn" id="markBtn" title="선택영역 강조(.mark)">형광</button>
-      <button class="btn" id="verseBtn" title="선택영역 성경(.verse)">구절</button>
-      <select id="fontFamily" title="글꼴">
-        <option value="">글꼴</option>
-        <option>system-ui</option>
-        <option>Noto Serif KR</option>
-        <option>Nanum Myeongjo</option>
-        <option>Arial</option>
-        <option>Times New Roman</option>
-      </select>
-      <select id="fontSize" title="글자 크기">
-        <option value="">크기</option>
-        <option value="14">14</option>
-        <option value="16">16</option>
-        <option value="18" selected>18</option>
-        <option value="20">20</option>
-        <option value="22">22</option>
-        <option value="24">24</option>
-      </select>
-      <button class="btn" id="linkBtn" title="링크">🔗 링크</button>
-      <button class="btn" id="verseInsertBtn" title="성경 구절 삽입">✚ 구절 삽입</button>
-    </div>
-    <button class="btn" id="insertPassage">본문 삽입</button>
-    <button class="btn" id="theme">라이트/다크</button>
-    <button class="btn" id="print">인쇄 / PDF</button>
-  </header>
-
-  <main>
-    <aside>
-      <div class="card field">
-        <label>설교 목록 관리</label>
-        <div class="row" style="gap:8px">
-          <input id="saveName" class="input" placeholder="저장 이름 (예: 2025-11-02 주일)" />
-          <button class="btn ok" id="save">저장</button>
-        </div>
-        <div class="list" id="savedList"></div>
-      </div>
-
-      <div class="card field">
-        <label>한문장씩 낭독 · 설교 추적</label>
-        <div class="row" style="gap:6px; flex-wrap:wrap">
-          <button class="btn" id="ttsToggle">▶︎ 재생</button>
-          <button class="btn" id="ttsPrev">⟨ 이전</button>
-          <button class="btn" id="ttsNext">다음 ⟩</button>
-          <button class="btn danger" id="ttsStop">■ 정지</button>
-        </div>
-        <div class="row" style="gap:8px; align-items:center">
-          <label class="sub">음성</label>
-          <select id="voiceSel" class="input"></select>
-        </div>
-        <div class="row" style="gap:8px; align-items:center">
-          <label class="sub">속도</label>
-          <input type="range" id="rate" min="0.6" max="1.6" step="0.05" value="1"/>
-          <span id="rateVal" class="sub">1.00×</span>
-        </div>
-        <div class="row" style="gap:6px; flex-wrap:wrap; align-items:center">
-          <button class="btn" id="micToggle">🎙 설교추적 시작</button>
-          <span id="asrState" class="sub">마이크 꺼짐</span>
-        </div>
-        <div class="hint">본문의 문장을 자동으로 분리해 현재 문장을 <span class="badge">녹색 하이라이트</span>로 표시하고 자동 스크롤합니다. 문장을 클릭하면 해당 문장부터 읽습니다.</div>
-      </div>
-
-      <div class="card field">
-        <label>성경 데이터 (bible.json)</label>
-        <div class="row" style="gap:8px; align-items:center">
-          <div id="bibleStatus" class="sub">미로딩</div>
-          <span class="sep"></span>
-          <input type="file" id="bibleFile" accept="application/json" style="display:none" />
-          <button class="btn" id="bibleLoadBtn">불러오기</button>
-        </div>
-        <div class="hint">프로젝트 폴더에 <span class="kbd">bible.json</span>이 있으면 자동으로 로드됩니다. 없으면 <b>불러오기</b>로 파일을 선택하세요.</div>
-      </div>
-
-      <div class="card hint">
-        ⌘/Ctrl+S 수동저장 · Ctrl+B/I/U 서식 · Ctrl+K 링크
-      </div>
-    </aside>
-
-    <section class="editor-wrap">
-      <input id="title" class="input" placeholder="설교 제목을 입력하세요" />
-      <div id="content" contenteditable="true" spellcheck="false">
-        <h2>샘플</h2>
-        <p class="verse">“하나님은 영이시니 예배하는 자가 영과 진리로 예배할지니라.” (요 4:24)</p>
-        <p>설교 본문과 적용, 결단을 작성하세요. <span class="mark">핵심 문장은 형광표시</span>로 강조하세요.</p>
-        <details class="toggle"><summary>예화</summary><p>이곳을 열고 닫으며 예화를 정리할 수 있습니다.</p></details>
-        <hr class="page-break" />
-        <h3>결단</h3>
-        <ul>
-          <li>한 주간 실천 1</li>
-          <li>한 주간 실천 2</li>
-        </ul>
-      </div>
-    </section>
-  </main>
-
-  <footer>
-    <div id="status">자동저장 대기 중…</div>
-    <span class="sep"></span>
-    <div class="badge">저장소: localStorage</div>
-  </footer>
-
-  <dialog id="passageDlg">
-    <form method="dialog" class="card" style="min-width:min(720px, 90vw)">
-      <h3 style="margin:0 0 8px">본문 삽입</h3>
-      <div class="field">
-        <label>텍스트</label>
-        <textarea id="passageText" class="input" rows="8" placeholder="여기에 본문을 붙여넣으세요"></textarea>
-      </div>
-      <div class="row" style="justify-content:space-between; margin-top:8px">
-        <div class="row" style="gap:8px">
-          <label class="row sub" style="gap:6px"><input type="checkbox" id="asVerse" checked /> 전체를 .verse 처리</label>
-          <label class="row sub" style="gap:6px"><input type="checkbox" id="autoMark" /> 대괄호[ ] 안은 .mark</label>
-        </div>
-        <div class="row" style="gap:6px">
-          <button class="btn ghost" id="dlgCancel">취소</button>
-          <button class="btn ok" id="dlgInsert">삽입</button>
-        </div>
-      </div>
-    </form>
-  </dialog>
-
-  <!-- 성경 구절 삽입 다이얼로그 -->
-  <dialog id="verseInsertDlg">
-    <form method="dialog" class="card" style="min-width:min(720px, 90vw)">
-      <h3 style="margin:0 0 8px">성경 구절 삽입</h3>
-      <div class="field">
-        <label>구절 표기 (예: 창 1:1-3, 요 4:24)</label>
-        <input id="verseRef" class="input" placeholder="예: 창세기 1:1-3" />
-      </div>
-      <div class="field">
-        <label>본문 텍스트 (비워두면 bible.json에서 자동으로 채움)</label>
-        <textarea id="verseBody" class="input" rows="5" placeholder="여기에 구절 본문을 붙여넣거나 비워두세요"></textarea>
-      </div>
-      <div class="row" style="justify-content:space-between; margin-top:8px">
-        <div class="row" style="gap:8px; flex-wrap:wrap">
-          <label class="row sub" style="gap:6px"><input type="checkbox" id="verseAsVerse" checked /> .verse 스타일 적용</label>
-          <label class="row sub" style="gap:6px"><input type="checkbox" id="verseAppendRef" checked /> 문장 뒤에 (구절 표기) 붙이기</label>
-          <label class="row sub" style="gap:6px"><input type="checkbox" id="verseAutoMark" /> 대괄호[ ] 강조(.mark)</label>
-          <label class="row sub" style="gap:6px"><input type="checkbox" id="verseIncludeNum" checked /> 절 번호 포함</label>
-        </div>
-        <div class="row" style="gap:6px">
-          <button class="btn ghost" id="verseDlgCancel">취소</button>
-          <button class="btn ok" id="verseDlgInsert">삽입</button>
-        </div>
-      </div>
-      <div class="hint">예) <span class="badge">창세기 1:1-3</span> · <span class="badge">요 3:16</span> · 책 이름은 접두 일치 허용(창 → 창세기)</div>
-    </form>
-  </dialog>
-
-  <script>
-    // ====== 유틸 ======
-    const $ = (sel,root=document)=>root.querySelector(sel);
-    const $$ = (sel,root=document)=>Array.from(root.querySelectorAll(sel));
-    const content = $('#content');
-    const titleEl = $('#title');
-    const statusEl = $('#status');
-    const STORAGE_KEY = 'sermon_editor_doc';
-    const SAVED_KEY = 'sermon_editor_items';
-
-    // ====== 테마 전환 ======
-    const themeBtn = $('#theme');
-    const savedTheme = localStorage.getItem('sermon_theme');
-    if(savedTheme) document.documentElement.setAttribute('data-theme', savedTheme);
-    themeBtn.addEventListener('click', ()=>{
-      const cur = document.documentElement.getAttribute('data-theme')==='light'?'dark':'light';
-      document.documentElement.setAttribute('data-theme', cur);
-      localStorage.setItem('sermon_theme', cur);
-    });
-
-    // ====== 인쇄 ======
-    $('#print').addEventListener('click', ()=>window.print());
-
-    // ====== execCommand 보조 / 커스텀 스타일 ======
-    function cmd(name, value=null){ document.execCommand(name,false,value); saveSoon(); }
-    function wrapSelection(tag, className){
-      const sel = window.getSelection();
-      if(!sel.rangeCount) return;
-      const r = sel.getRangeAt(0);
-      const el = document.createElement(tag);
-      if(className) el.className = className;
-      r.surroundContents(el);
-      sel.removeAllRanges(); sel.addRange(r);
-      saveSoon();
-    }
-    function applyInlineStyle(styleProp, value){
-      const sel = window.getSelection();
-      if(!sel.rangeCount) return;
-      const r = sel.getRangeAt(0);
-      const span = document.createElement('span');
-      span.style[styleProp] = value;
-      try{ r.surroundContents(span); }
-      catch{
-        span.appendChild(r.extractContents());
-        r.insertNode(span);
-      }
-      saveSoon();
-    }
-
-    // ====== 툴바 이벤트 ======
-    $('#bold').onclick = ()=>cmd('bold');
-    $('#italic').onclick = ()=>cmd('italic');
-    $('#underline').onclick = ()=>cmd('underline');
-    $('#quote').onclick = ()=>cmd('formatBlock','blockquote');
-    $('#color').addEventListener('input', e=>cmd('foreColor', e.target.value));
-    $('#markBtn').onclick = ()=>wrapSelection('span','mark');
-    $('#verseBtn').onclick = ()=>wrapSelection('span','verse');
-    $('#linkBtn').onclick = ()=>{
-      const url = prompt('링크 URL 입력', 'https://');
-      if(url) cmd('createLink', url);
-    }
-    $('#fontFamily').onchange = e=>{ if(e.target.value) applyInlineStyle('fontFamily', e.target.value); };
-    $('#fontSize').onchange = e=>{ if(e.target.value) applyInlineStyle('fontSize', e.target.value+'px'); };
-
-    $('#blockType').onchange = (e)=>{
-      const v = e.target.value;
-      if(v==='p') cmd('formatBlock','p');
-      else if(v==='h1') cmd('formatBlock','h1');
-      else if(v==='h2') cmd('formatBlock','h2');
-      else if(v==='h3') cmd('formatBlock','h3');
-      else if(v==='ul') cmd('insertUnorderedList');
-      else if(v==='page') insertPageBreak();
-      else if(v==='toggle') insertToggleFromSelection();
-      e.target.value='p';
-    };
-
-    function insertPageBreak(){
-      const hr = document.createElement('hr'); hr.className='page-break';
-      insertNodeAtCaret(hr);
-      saveSoon();
-    }
-    function insertToggleFromSelection(){
-      const sel = window.getSelection();
-      const details = document.createElement('details');
-      details.className = 'toggle';
-      const sum = document.createElement('summary'); sum.textContent = '제목을 입력하세요';
-      const p = document.createElement('p'); p.textContent = '내용을 입력하세요';
-      details.append(sum, p);
-      if(sel && sel.rangeCount && !sel.isCollapsed){
-        const r = sel.getRangeAt(0);
-        const text = r.toString();
-        sum.textContent = text.split('\n')[0] || '토글';
-        try{ r.deleteContents(); }catch{}
-      }
-      insertNodeAtCaret(details);
-      saveSoon();
-    }
-    function insertNodeAtCaret(node){
-      const sel = window.getSelection();
-      if(sel && sel.rangeCount){
-        const r = sel.getRangeAt(0); r.collapse(true); r.insertNode(node);
-      }else{
-        content.appendChild(node);
-      }
-    }
-
-    // ====== 성경 구절 삽입 다이얼로그 ======
-    const verseDlg = $('#verseInsertDlg');
-    const verseBtn = $('#verseInsertBtn');
-    verseBtn.addEventListener('click', ()=> verseDlg.showModal());
-    $('#verseDlgCancel').addEventListener('click', (e)=>{ e.preventDefault(); verseDlg.close(); });
-    $('#verseDlgInsert').addEventListener('click', (e)=>{
-      e.preventDefault();
-      const ref = ($('#verseRef').value||'').trim();
-      let body = ($('#verseBody').value||'').trim();
-      const asVerse = $('#verseAsVerse').checked;
-      const appendRef = $('#verseAppendRef').checked;
-      const autoMark = $('#verseAutoMark').checked;
-      const includeNum = $('#verseIncludeNum').checked;
-
-      // bible.json에서 자동 조회 (본문이 비어 있을 때)
-      if(!body && window.BIBLE){
-        const fetched = getVerseTextFromBible(ref, {includeNum});
-        if(fetched){ body = fetched; }
-      }
-
-      // 사용자 입력 본문 전처리
-      if(body){
-        body = escapeHtml(body);
-        if(autoMark) body = body.replace(/\[(.+?)\]/g, '<span class="mark">$1</span>');
-      } else {
-        body = '구절 본문을 입력하세요';
-      }
-
-      const p = document.createElement('p');
-      const inner = asVerse ? `<span class="verse">${body}</span>` : body;
-      const refText = ref ? ` <span class="sub">(${escapeHtml(ref)})</span>` : '';
-      p.innerHTML = inner + (appendRef ? refText : '');
-      insertNodeAtCaret(p);
-
-      verseDlg.close();
-      $('#verseRef').value=''; $('#verseBody').value='';
-      saveSoon();
-    });
-
-    // ====== 자동저장 & 상태 ======
-    let saveTimer=null; let lastSavedAt=null; let dirty=false;
-    function saveSoon(){ dirty=true; status('작성 중…'); clearTimeout(saveTimer); saveTimer=setTimeout(saveNow, 600); }
-    function status(msg){ statusEl.textContent = msg; }
-    function saveNow(){
-      const data = {title:titleEl.value, html:content.innerHTML, t:Date.now()};
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-      dirty=false; lastSavedAt=new Date();
-      status(`자동저장됨 · ${lastSavedAt.toLocaleTimeString()}`);
-      refreshSavedListMetaHighlight();
-    }
-    ['input','keyup','change'].forEach(ev=>{
-      content.addEventListener(ev, saveSoon); titleEl.addEventListener(ev, saveSoon);
-    });
-
-    // 초기 로드
-    (function initLoad(){
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if(raw){ try{ const d=JSON.parse(raw); titleEl.value=d.title||''; content.innerHTML=d.html||''; }catch{} }
-      status('자동저장 대기 중…');
-    })();
-
-    // ====== 설교 목록 (저장/불러오기/삭제/이름변경) ======
-    const saveBtn=$('#save'); const saveNameEl=$('#saveName'); const listEl=$('#savedList');
-    function savedMap(){ try{return JSON.parse(localStorage.getItem(SAVED_KEY)||'{}')}catch{return{}} }
-    function setSavedMap(m){ localStorage.setItem(SAVED_KEY, JSON.stringify(m)); }
-
-    saveBtn.onclick = ()=>{
-      const name = (saveNameEl.value||titleEl.value||'무제').trim(); if(!name){ alert('이름을 입력하세요'); return; }
-      const id = Date.now().toString(36);
-      const m = savedMap();
-      m[id] = {id, name, title:titleEl.value, html:content.innerHTML, updated:new Date().toISOString()};
-      setSavedMap(m); refreshSavedList();
-      status('목록에 저장되었습니다');
-    };
-
-    function refreshSavedList(){
-      listEl.innerHTML='';
-      const m = savedMap();
-      const arr = Object.values(m).sort((a,b)=>new Date(b.updated)-new Date(a.updated));
-      if(arr.length===0){ listEl.innerHTML = '<div class="sub">저장된 설교가 없습니다.</div>'; return; }
-      arr.forEach(it=>{
-        const div = document.createElement('div'); div.className='list-item';
-        const left = document.createElement('div'); left.className='row';
-        const name = document.createElement('div'); name.textContent = it.name; name.style.fontWeight='600';
-        const sub = document.createElement('div'); sub.className='sub'; sub.textContent = new Date(it.updated).toLocaleString();
-        left.append(name, sub);
-        const right = document.createElement('div'); right.className='row';
-        const loadB = btn('불러오기', ()=>{ titleEl.value = it.title||it.name; content.innerHTML = it.html||''; saveSoon(); });
-        const renB = btn('이름', ()=>{
-          const nv = prompt('새 이름', it.name); if(!nv) return; const m=savedMap(); m[it.id].name = nv; m[it.id].updated=new Date().toISOString(); setSavedMap(m); refreshSavedList();
-        });
-        const delB = btn('삭제', ()=>{
-          if(confirm('삭제하시겠습니까?')){ const m=savedMap(); delete m[it.id]; setSavedMap(m); refreshSavedList(); }
-        });
-        delB.classList.add('danger');
-        right.append(loadB, renB, delB);
-        div.append(left, right);
-        listEl.append(div);
-      });
-    }
-    function btn(txt, fn){ const b=document.createElement('button'); b.className='btn'; b.textContent=txt; b.onclick=fn; return b; }
-    function refreshSavedListMetaHighlight(){ /* reserve for future: highlight if current doc matches a saved one */ }
-    refreshSavedList();
-
-    // ====== 단축키 ======
-    document.addEventListener('keydown', (e)=>{
-      if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='s'){ e.preventDefault(); saveNow(); }
-      if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='k'){ e.preventDefault(); $('#linkBtn').click(); }
-    });
-
-    // ====== 한문장씩 낭독 + 설교 추적 (TTS) ======
-    let SENT_WRAPPED=false; let curIdx=0; let sentences=[]; let autoplay=false;
-    const synth = window.speechSynthesis;
-    const voiceSel = $('#voiceSel');
-    const rate = $('#rate'); const rateVal = $('#rateVal']);
-
-    function populateVoices(){
-      const vs = synth.getVoices();
-      voiceSel.innerHTML='';
-      vs.forEach((v)=>{
-        const opt = document.createElement('option');
-        opt.value = v.name; opt.textContent = `${v.name} (${v.lang})`;
-        if(v.lang.startsWith('ko')) opt.selected = true;
-        voiceSel.append(opt);
-      });
-      if(!voiceSel.value && vs[0]) voiceSel.value = vs[0].name;
-    }
-    populateVoices();
-    if (typeof speechSynthesis !== 'undefined') speechSynthesis.onvoiceschanged = populateVoices;
-
-    rate.addEventListener('input', ()=>{ rateVal.textContent = Number(rate.value).toFixed(2)+'×'; });
-
-    function wrapSentences(){
-      if(SENT_WRAPPED){ sentences = $$('#content .sent'); return; }
-      const walker = document.createTreeWalker(content, NodeFilter.SHOW_TEXT, {
-        acceptNode(node){
-          if(!node.nodeValue.trim()) return NodeFilter.FILTER_REJECT;
-          if(node.parentElement && (node.parentElement.closest('script,style,details summary'))) return NodeFilter.FILTER_REJECT;
-          return NodeFilter.FILTER_ACCEPT;
-        }
-      });
-      const REG=/([^.!?\n\r\t\u3002\uFF01\uFF1F]+[.!?\u3002\uFF01\uFF1F]\s*)/g; // 문장 단위 추정
-      const toWrap=[];
-      while(walker.nextNode()){
-        const n = walker.currentNode;
-        const txt = n.nodeValue;
-        if(REG.test(txt)){
-          REG.lastIndex=0; let idx=0; let m; const parts=[];
-          while((m=REG.exec(txt))!==null){
-            const s=m[0];
-            parts.push(s);
-            idx += s.length;
-          }
-          const rest = txt.slice(idx);
-          if(rest.trim()) parts.push(rest);
-          if(parts.length>0){ toWrap.push([n, parts]); }
-        }
-      }
-      toWrap.forEach(([node, parts])=>{
-        const frag=document.createDocumentFragment();
-        parts.forEach(p=>{
-          const span=document.createElement('span'); span.className='sent'; span.textContent=p; frag.appendChild(span);
-        });
-        node.replaceWith(frag);
-      });
-      SENT_WRAPPED=true; sentences = $$('#content .sent');
-      sentences.forEach((s,idx)=> s.addEventListener('click', ()=>{startAt(idx);}));
-    }
-
-    function speakCurrent(){
-      if(!sentences.length) return;
-      const s = sentences[curIdx];
-      sentences.forEach(x=>x.classList.remove('current'));
-      s.classList.add('current'); s.scrollIntoView({behavior:'smooth', block:'center'});
-      const u = new SpeechSynthesisUtterance(s.textContent.trim());
-      const vv = synth.getVoices().find(v=>v.name===voiceSel.value);
-      if(vv) u.voice = vv; u.rate = Number(rate.value)||1;
-      u.onend = ()=>{ if(autoplay){ next(); } };
-      u.onerror = ()=>{ autoplay=false; };
-      synth.cancel(); synth.speak(u);
-    }
-
-    function startAt(i=0){ wrapSentences(); curIdx = Math.max(0, Math.min(i, sentences.length-1)); autoplay=true; speakCurrent(); updateTtsBtn(); }
-    function stopAll(){ autoplay=false; synth.cancel(); updateTtsBtn(); sentences.forEach(x=>x.classList.remove('current')); }
-    function next(){ if(curIdx < sentences.length-1){ curIdx++; speakCurrent(); } else { stopAll(); } }
-    function prev(){ if(curIdx>0){ curIdx--; speakCurrent(); } }
-
-    $('#ttsToggle').onclick = ()=>{ if(autoplay){ stopAll(); } else { startAt(curIdx||0); } };
     $('#ttsNext').onclick = ()=> next();
     $('#ttsPrev').onclick = ()=> prev();
     $('#ttsStop').onclick = ()=> stopAll();
