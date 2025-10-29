@@ -36,8 +36,6 @@
     .btn.ok{border-color:transparent; background:var(--ok); color:#08261d}
     .btn.danger{border-color:var(--danger); color:var(--danger); background:transparent}
 
-    .toolbar{display:flex; gap:6px; flex-wrap:wrap}
-
     main{display:grid; grid-template-columns:320px 1fr; gap:10px; padding:0 10px}
     aside{
       background:var(--panel); border:1px solid var(--border); border-radius:14px; padding:10px;
@@ -110,49 +108,18 @@
     .asr-on #content .sent.current{ background:rgba(77,212,172,.28) }
     .asr-part{ background:linear-gradient(90deg, rgba(77,212,172,.28) var(--asrPct,0%), transparent 0%) }
     .asr-error{ outline:1px dashed var(--danger) }
+
+    /* 플로팅 툴바 */
+    .floatbar{position:absolute; z-index:50; display:flex; gap:6px; align-items:center; padding:6px; background:var(--panel); border:1px solid var(--border); border-radius:12px; box-shadow:0 8px 24px rgba(0,0,0,.35)}
+    .floatbar [class^="btn"], .floatbar .input, .floatbar select{font-size:13px}
+    .floatbar[hidden]{display:none}
   </style>
 </head>
 <body>
   <header>
     <div class="brand">📝 Sermon-Editor-1.0</div>
     <span class="sep"></span>
-    <div class="toolbar" aria-label="Formatting toolbar">
-      <select id="blockType" title="전환 (블록 유형)">
-        <option value="p">텍스트</option>
-        <option value="h1">제목1</option>
-        <option value="h2">제목2</option>
-        <option value="h3">제목3</option>
-        <option value="ul">글머리 기호 목록</option>
-        <option value="toggle">토글목록</option>
-        <option value="page">페이지 나눔</option>
-      </select>
-      <button class="btn" id="bold" title="굵게 (Ctrl+B)"><b>B</b></button>
-      <button class="btn" id="italic" title="기울임 (Ctrl+I)"><i>I</i></button>
-      <button class="btn" id="underline" title="밑줄 (Ctrl+U)"><u>U</u></button>
-      <input type="color" id="color" title="글자색" />
-      <button class="btn" id="quote" title="인용문">❝ 인용</button>
-      <button class="btn" id="markBtn" title="선택영역 강조(.mark)">형광</button>
-      <button class="btn" id="verseBtn" title="선택영역 성경(.verse)">구절</button>
-      <select id="fontFamily" title="글꼴">
-        <option value="">글꼴</option>
-        <option>system-ui</option>
-        <option>Noto Serif KR</option>
-        <option>Nanum Myeongjo</option>
-        <option>Arial</option>
-        <option>Times New Roman</option>
-      </select>
-      <select id="fontSize" title="글자 크기">
-        <option value="">크기</option>
-        <option value="14">14</option>
-        <option value="16">16</option>
-        <option value="18" selected>18</option>
-        <option value="20">20</option>
-        <option value="22">22</option>
-        <option value="24">24</option>
-      </select>
-      <button class="btn" id="linkBtn" title="링크">🔗 링크</button>
-      <button class="btn" id="verseInsertBtn" title="성경 구절 삽입">✚ 구절 삽입</button>
-    </div>
+    <!-- 고정 툴바 제거됨 (플로팅 툴바 사용) -->
     <button class="btn" id="insertPassage">본문 삽입</button>
     <button class="btn" id="theme">라이트/다크</button>
     <button class="btn" id="print">인쇄 / PDF</button>
@@ -231,6 +198,45 @@
     <span class="sep"></span>
     <div class="badge">저장소: localStorage</div>
   </footer>
+
+  <!-- 플로팅 편집 툴바 -->
+  <div id="floatbar" class="floatbar" hidden>
+    <select id="fBlockType" title="전환 (블록 유형)">
+      <option value="p">텍스트</option>
+      <option value="h1">제목1</option>
+      <option value="h2">제목2</option>
+      <option value="h3">제목3</option>
+      <option value="ul">글머리 기호 목록</option>
+      <option value="toggle">토글목록</option>
+      <option value="page">페이지 나눔</option>
+    </select>
+    <button class="btn" id="fBold" title="굵게 (Ctrl+B)"><b>B</b></button>
+    <button class="btn" id="fItalic" title="기울임 (Ctrl+I)"><i>I</i></button>
+    <button class="btn" id="fUnderline" title="밑줄 (Ctrl+U)"><u>U</u></button>
+    <input type="color" id="fColor" title="글자색" />
+    <button class="btn" id="fQuote" title="인용문">❝</button>
+    <button class="btn" id="fMarkBtn" title="선택영역 강조(.mark)">형광</button>
+    <button class="btn" id="fVerseBtn" title="선택영역 성경(.verse)">구절</button>
+    <select id="fFontFamily" title="글꼴">
+      <option value="">글꼴</option>
+      <option>system-ui</option>
+      <option>Noto Serif KR</option>
+      <option>Nanum Myeongjo</option>
+      <option>Arial</option>
+      <option>Times New Roman</option>
+    </select>
+    <select id="fFontSize" title="글자 크기">
+      <option value="">크기</option>
+      <option value="14">14</option>
+      <option value="16">16</option>
+      <option value="18" selected>18</option>
+      <option value="20">20</option>
+      <option value="22">22</option>
+      <option value="24">24</option>
+    </select>
+    <button class="btn" id="fLinkBtn" title="링크">🔗</button>
+    <button class="btn" id="fVerseInsertBtn" title="성경 구절 삽입">✚</button>
+  </div>
 
   <dialog id="passageDlg">
     <form method="dialog" class="card" style="min-width:min(720px, 90vw)">
@@ -329,22 +335,46 @@
       saveSoon();
     }
 
-    // ====== 툴바 이벤트 ======
-    $('#bold').onclick = ()=>cmd('bold');
-    $('#italic').onclick = ()=>cmd('italic');
-    $('#underline').onclick = ()=>cmd('underline');
-    $('#quote').onclick = ()=>cmd('formatBlock','blockquote');
-    $('#color').addEventListener('input', e=>cmd('foreColor', e.target.value));
-    $('#markBtn').onclick = ()=>wrapSelection('span','mark');
-    $('#verseBtn').onclick = ()=>wrapSelection('span','verse');
-    $('#linkBtn').onclick = ()=>{
+    // ====== 플로팅 툴바 ======
+    const floatbar = $('#floatbar');
+    function selInContent(){
+      const sel=window.getSelection();
+      if(!sel || !sel.rangeCount) return false;
+      const node = sel.anchorNode;
+      return node && content.contains(node);
+    }
+    function placeFloatbar(){
+      const sel = window.getSelection();
+      if(!sel || !sel.rangeCount){ floatbar.hidden=true; return; }
+      const r = sel.getRangeAt(0);
+      if(r.collapsed || !selInContent()){ floatbar.hidden=true; return; }
+      const rect = r.getBoundingClientRect();
+      const fb = floatbar; fb.hidden=false;
+      const top = (rect.top + window.scrollY) - fb.offsetHeight - 8;
+      const left = (rect.left + rect.width/2 + window.scrollX) - fb.offsetWidth/2;
+      fb.style.top = Math.max(8, top) + 'px';
+      fb.style.left = Math.max(8, left) + 'px';
+    }
+    ['mouseup','keyup'].forEach(ev=> content.addEventListener(ev, placeFloatbar));
+    document.addEventListener('scroll', ()=>{ if(!floatbar.hidden) placeFloatbar(); }, {passive:true});
+    document.addEventListener('mousedown', (e)=>{ if(!floatbar.contains(e.target) && !content.contains(e.target)) floatbar.hidden=true; });
+
+    // 플로팅 툴바 이벤트
+    $('#fBold').onclick = ()=>cmd('bold');
+    $('#fItalic').onclick = ()=>cmd('italic');
+    $('#fUnderline').onclick = ()=>cmd('underline');
+    $('#fQuote').onclick = ()=>cmd('formatBlock','blockquote');
+    $('#fColor').addEventListener('input', e=>cmd('foreColor', e.target.value));
+    $('#fMarkBtn').onclick = ()=>wrapSelection('span','mark');
+    $('#fVerseBtn').onclick = ()=>wrapSelection('span','verse');
+    $('#fLinkBtn').onclick = ()=>{
       const url = prompt('링크 URL 입력', 'https://');
       if(url) cmd('createLink', url);
     }
-    $('#fontFamily').onchange = e=>{ if(e.target.value) applyInlineStyle('fontFamily', e.target.value); };
-    $('#fontSize').onchange = e=>{ if(e.target.value) applyInlineStyle('fontSize', e.target.value+'px'); };
+    $('#fFontFamily').onchange = e=>{ if(e.target.value) applyInlineStyle('fontFamily', e.target.value); };
+    $('#fFontSize').onchange = e=>{ if(e.target.value) applyInlineStyle('fontSize', e.target.value+'px'); };
 
-    $('#blockType').onchange = (e)=>{
+    $('#fBlockType').onchange = (e)=>{
       const v = e.target.value;
       if(v==='p') cmd('formatBlock','p');
       else if(v==='h1') cmd('formatBlock','h1');
@@ -354,8 +384,13 @@
       else if(v==='page') insertPageBreak();
       else if(v==='toggle') insertToggleFromSelection();
       e.target.value='p';
+      placeFloatbar();
     };
 
+    // 플로팅에서 "구절 삽입" 열기
+    $('#fVerseInsertBtn').addEventListener('click', ()=> $('#verseInsertDlg').showModal());
+
+    // ====== 블록 삽입 유틸 ======
     function insertPageBreak(){
       const hr = document.createElement('hr'); hr.className='page-break';
       insertNodeAtCaret(hr);
@@ -386,10 +421,8 @@
       }
     }
 
-    // ====== 성경 구절 삽입 다이얼로그 ======
+    // ====== 성경 구절 삽입 다이얼로그(본문 로직) ======
     const verseDlg = $('#verseInsertDlg');
-    const verseBtn = $('#verseInsertBtn');
-    verseBtn.addEventListener('click', ()=> verseDlg.showModal());
     $('#verseDlgCancel').addEventListener('click', (e)=>{ e.preventDefault(); verseDlg.close(); });
     $('#verseDlgInsert').addEventListener('click', (e)=>{
       e.preventDefault();
@@ -400,13 +433,11 @@
       const autoMark = $('#verseAutoMark').checked;
       const includeNum = $('#verseIncludeNum').checked;
 
-      // bible.json에서 자동 조회 (본문이 비어 있을 때)
       if(!body && window.BIBLE){
         const fetched = getVerseTextFromBible(ref, {includeNum});
         if(fetched){ body = fetched; }
       }
 
-      // 사용자 입력 본문 전처리
       if(body){
         body = escapeHtml(body);
         if(autoMark) body = body.replace(/\[(.+?)\]/g, '<span class="mark">$1</span>');
@@ -487,13 +518,13 @@
       });
     }
     function btn(txt, fn){ const b=document.createElement('button'); b.className='btn'; b.textContent=txt; b.onclick=fn; return b; }
-    function refreshSavedListMetaHighlight(){ /* reserve for future: highlight if current doc matches a saved one */ }
+    function refreshSavedListMetaHighlight(){ /* reserve for future */ }
     refreshSavedList();
 
     // ====== 단축키 ======
     document.addEventListener('keydown', (e)=>{
       if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='s'){ e.preventDefault(); saveNow(); }
-      if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='k'){ e.preventDefault(); $('#linkBtn').click(); }
+      if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='k'){ e.preventDefault(); $('#fLinkBtn').click(); }
     });
 
     // ====== 한문장씩 낭독 + 설교 추적 (TTS) ======
@@ -502,7 +533,7 @@
     const voiceSel = $('#voiceSel');
     const rate = $('#rate'); const rateVal = $('#rateVal');
 
-    // --- 음성 로드 대기 + 목록 구성 ---
+    // 음성 로드 대기 + 목록 구성
     function awaitVoices(timeout=1500){
       return new Promise(resolve=>{
         const vs = synth.getVoices();
@@ -541,7 +572,7 @@
 
     rate.addEventListener('input', ()=>{ rateVal.textContent = Number(rate.value).toFixed(2)+'×'; });
 
-    // --- 사용자 제스처에서 오디오 잠금 해제 ---
+    // 사용자 제스처에서 오디오 잠금 해제
     let audioUnlocked = false;
     function unlockAudio(){
       if (audioUnlocked) return;
@@ -636,7 +667,7 @@
       if(sent){ const idx = sentences.indexOf(sent); if(idx>=0){ curIdx=idx; if(!autoplay) speakCurrent(); } }
     });
 
-    content.addEventListener('input', ()=>{ SENT_WRAPPED=false; sentences=[]; });
+    content.addEventListener('input', ()=>{ SENT_WRAPPED=false; sentences=[]; floatbar.hidden=true; });
 
     // ====== 성경 데이터 로딩 (bible.json) ======
     const BIBLE_CACHE_KEY = 'sermon_editor_bible_json';
@@ -728,7 +759,7 @@
     // ====== 드래프트 자동저장 보조 ======
     window.addEventListener('beforeunload', (e)=>{ if(dirty){ saveNow(); } });
 
-    // ====== 설교추적 (ASR: 음성 인식으로 현재 문장 진행률/자동 이동) ======
+    // ====== 설교추적 (ASR) ======
     (function(){
       const asrSupported = ('webkitSpeechRecognition' in window) || ('SpeechRecognition' in window);
       let recognizer = null; let micOn = false; let partialText = '';
