@@ -120,7 +120,7 @@
     <div class="brand">📝 Sermon-Editor-1.0</div>
     <span class="sep"></span>
     <!-- 고정 툴바 제거됨 (플로팅 툴바 사용) -->
-    <button class="btn" id="insertPassage">본문 삽입</button>
+    <button class="btn" id="openVerseDlg">성구삽입</button>
     <button class="btn" id="theme">라이트/다크</button>
     <button class="btn" id="print">인쇄 / PDF</button>
   </header>
@@ -849,8 +849,9 @@
     })();
 
     // ====== 본문 삽입 다이얼로그 ======
-    const passageDlg = $('#passageDlg');
-    $('#insertPassage').onclick = ()=>passageDlg.showModal();
+    const passageDlg = $('#passageDlg'); // 필요시 계속 사용 가능
+    // 상단 '성구삽입' 버튼이 성경 구절 삽입 다이얼로그를 열도록 변경
+    $('#openVerseDlg').onclick = ()=> $('#verseInsertDlg').showModal();
     $('#dlgCancel').onclick = (e)=>{ e.preventDefault(); passageDlg.close(); };
     $('#dlgInsert').onclick = (e)=>{
       e.preventDefault();
