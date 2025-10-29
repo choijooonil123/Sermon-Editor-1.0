@@ -500,21 +500,22 @@
     let SENT_WRAPPED=false; let curIdx=0; let sentences=[]; let autoplay=false;
     const synth = window.speechSynthesis;
     const voiceSel = $('#voiceSel');
-    const rate = $('#rate'); const rateVal = $('#rateVal']);
+    const rate = $('#rate'); const rateVal = $('#rateVal');
 
-    // 음성 로드 대기 유틸
+    // --- 음성 로드 대기 + 목록 구성 ---
     function awaitVoices(timeout=1500){
       return new Promise(resolve=>{
         const vs = synth.getVoices();
         if (vs && vs.length) return resolve(vs);
         const t = setTimeout(()=> resolve(synth.getVoices()), timeout);
-        speechSynthesis.onvoiceschanged = ()=>{
-          clearTimeout(t);
-          resolve(synth.getVoices());
-        };
+        if (typeof speechSynthesis !== 'undefined'){
+          speechSynthesis.onvoiceschanged = ()=>{
+            clearTimeout(t);
+            resolve(synth.getVoices());
+          };
+        }
       });
     }
-
     async function populateVoices(){
       const vs = await awaitVoices();
       voiceSel.innerHTML='';
@@ -529,18 +530,18 @@
         opt.value = v.name; opt.textContent = `${v.name} (${v.lang})`;
         voiceSel.append(opt);
       });
-      // 선호: ko → en → 첫 번째
       const prefer = vs.find(v=>/^ko/i.test(v.lang)) || vs.find(v=>/^en/i.test(v.lang)) || vs[0];
       if (prefer) voiceSel.value = prefer.name;
     }
     populateVoices();
-
     voiceSel.addEventListener('change', ()=>{
       if (!sentences.length) return;
-      if (autoplay) speakCurrent(); // 현재 문장부터 새 목소리로 이어서
+      if (autoplay) speakCurrent();
     });
 
-    // 첫 사용자 제스처에서 오디오 잠금 해제
+    rate.addEventListener('input', ()=>{ rateVal.textContent = Number(rate.value).toFixed(2)+'×'; });
+
+    // --- 사용자 제스처에서 오디오 잠금 해제 ---
     let audioUnlocked = false;
     function unlockAudio(){
       if (audioUnlocked) return;
@@ -551,8 +552,6 @@
       window.addEventListener(ev, unlockAudio, { once:true, passive:true });
     });
 
-    rate.addEventListener('input', ()=>{ rateVal.textContent = Number(rate.value).toFixed(2)+'×'; });
-
     function wrapSentences(){
       if(SENT_WRAPPED){ sentences = $$('#content .sent'); return; }
       const walker = document.createTreeWalker(content, NodeFilter.SHOW_TEXT, {
@@ -562,7 +561,7 @@
           return NodeFilter.FILTER_ACCEPT;
         }
       });
-      const REG=/([^.!?\n\r\t\u3002\uFF01\uFF1F]+[.!?\u3002\uFF01\uFF1F]\s*)/g; // 문장 단위 추정
+      const REG=/([^.!?\n\r\t\u3002\uFF01\uFF1F]+[.!?\u3002\uFF01\uFF1F]\s*)/g;
       const toWrap=[];
       while(walker.nextNode()){
         const n = walker.currentNode;
@@ -595,23 +594,18 @@
       const s = sentences[curIdx];
       sentences.forEach(x=>x.classList.remove('current'));
       s.classList.add('current'); s.scrollIntoView({behavior:'smooth', block:'center'});
-
       const u = new SpeechSynthesisUtterance(s.textContent.trim());
 
-      // 음성 선택 안전화
       const voices = synth.getVoices();
       let vv = voices.find(v=>v.name===voiceSel.value);
       if (!vv) vv = voices.find(v=>/^ko/i.test(v.lang)) || voices[0];
       if (vv) u.voice = vv;
-
-      // 언어 지정 (없으면 ko-KR 선호)
       u.lang = (vv && vv.lang) ? vv.lang : 'ko-KR';
 
       u.rate = Number(rate.value)||1;
       u.onend = ()=>{ if(autoplay){ next(); } };
       u.onerror = (e)=>{ autoplay=false; console.warn('TTS error', e); };
 
-      // iOS/일부 브라우저에서 queue 누적 방지
       try { synth.cancel(); } catch {}
       try { synth.speak(u); } catch (e) {
         console.warn('speak failed, retrying once', e);
@@ -619,21 +613,19 @@
       }
     }
 
-
     function startAt(i=0){ wrapSentences(); curIdx = Math.max(0, Math.min(i, sentences.length-1)); autoplay=true; speakCurrent(); updateTtsBtn(); }
     function stopAll(){ autoplay=false; synth.cancel(); updateTtsBtn(); sentences.forEach(x=>x.classList.remove('current')); }
     function next(){ if(curIdx < sentences.length-1){ curIdx++; speakCurrent(); } else { stopAll(); } }
     function prev(){ if(curIdx>0){ curIdx--; speakCurrent(); } }
 
     $('#ttsToggle').onclick = ()=>{
-      if (autoplay){ stopAll(); }
+      if(autoplay){ stopAll(); }
       else {
-        wrapSentences();               // 보강: 먼저 래핑 보장
+        wrapSentences();
         if (!sentences.length){ alert('낭독할 문장이 없습니다. 본문을 입력하세요.'); return; }
         startAt(curIdx||0);
       }
     };
-
     $('#ttsNext').onclick = ()=> next();
     $('#ttsPrev').onclick = ()=> prev();
     $('#ttsStop').onclick = ()=> stopAll();
