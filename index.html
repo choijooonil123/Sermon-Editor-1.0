@@ -9,11 +9,13 @@
       --bg:#0f1115; --panel:#161922; --panel-2:#141824; --text:#e6e8ef; --muted:#9aa0ab;
       --accent:#6ea8fe; --border:#252a36; --danger:#ff6b6b; --ok:#4dd4ac; --warn:#ffd166;
       --verse-bg: rgba(110,168,254,.12); --mark-bg: rgba(255,230,0,.22);
+      --verse-color:#ff5e5b; /* 밝은 주홍색 */
     }
     [data-theme="light"]{
       --bg:#f7f8fb; --panel:#ffffff; --panel-2:#f0f3f9; --text:#0f1220; --muted:#6b7280;
       --accent:#3b82f6; --border:#e5e7eb; --danger:#ef4444; --ok:#10b981; --warn:#eab308;
       --verse-bg: rgba(59,130,246,.12); --mark-bg: rgba(250,204,21,.25);
+      --verse-color:#ff5e5b; /* 라이트 테마에서도 동일 주홍색 */
     }
     *{box-sizing:border-box}
     html,body{height:100%}
@@ -71,7 +73,18 @@
     #content .toggle[open]{background:var(--panel-2)}
 
     /* 하이라이트 규칙 */
-    #content .verse{background:var(--verse-bg); font-style:italic}
+    #content .verse{
+      font-style:italic;
+      color:var(--verse-color);
+      background:transparent; /* 기존 파란 배경 제거 */
+    }
+    #content .verse-ref{
+      color:var(--verse-color);
+      font-style:normal;
+      opacity:.95;
+      margin-left:.35em;
+      white-space:nowrap;
+    }
     #content .mark{background:var(--mark-bg); padding:0 .15em; border-radius:.25em}
 
     /* 페이지 나눔 */
@@ -119,7 +132,6 @@
   <header>
     <div class="brand">📝 Sermon-Editor-1.0</div>
     <span class="sep"></span>
-    <!-- 고정 툴바 제거됨 (플로팅 툴바 사용) -->
     <button class="btn" id="openVerseDlg">성구삽입</button>
     <button class="btn" id="theme">라이트/다크</button>
     <button class="btn" id="print">인쇄 / PDF</button>
@@ -238,6 +250,7 @@
     <button class="btn" id="fVerseInsertBtn" title="성경 구절 삽입">✚</button>
   </div>
 
+  <!-- 본문 붙여넣기 다이얼로그 -->
   <dialog id="passageDlg">
     <form method="dialog" class="card" style="min-width:min(720px, 90vw)">
       <h3 style="margin:0 0 8px">본문 삽입</h3>
@@ -258,7 +271,7 @@
     </form>
   </dialog>
 
-  <!-- 성경 구절 삽입 (다이얼로그는 남겨두되, 기본 동작은 프롬프트 기반) -->
+  <!-- 성경 구절 삽입(참조 문자열 입력) -->
   <dialog id="verseInsertDlg">
     <form method="dialog" class="card" style="min-width:min(520px, 90vw)">
       <h3 style="margin:0 0 8px">성경 구절 삽입</h3>
@@ -278,7 +291,7 @@
     // ====== 유틸 ======
     const $ = (sel,root=document)=>root.querySelector(sel);
     const $$ = (sel,root=document)=>Array.from(root.querySelectorAll(sel));
-    const w = window, d = document; // ← 추가 별칭
+    const w = window, d = document;
     const content = $('#content');
     const titleEl = $('#title');
     const statusEl = $('#status');
@@ -376,7 +389,7 @@
       placeFloatbar();
     };
 
-    // 플로팅에서 "구절 삽입" → 프롬프트 삽입
+    // 플로팅 [✚]도 프롬프트 사용
     document.getElementById('fVerseInsertBtn')?.addEventListener('click', () => { saveCaret(); insertBiblePrompt(); });
 
     // ====== 블록 삽입 유틸 ======
@@ -404,7 +417,6 @@
 
     // === caret save/restore ===
     let _savedRange = null;
-
     function saveCaret(){
       const sel = window.getSelection();
       if(sel && sel.rangeCount && content.contains(sel.anchorNode)){
@@ -413,10 +425,8 @@
         _savedRange = null;
       }
     }
-
     function restoreCaret(){
       const sel = window.getSelection();
-      // 저장된 커서가 있으면 복원, 없으면 본문 끝으로 커서 이동
       if(_savedRange){
         sel.removeAllRanges();
         sel.addRange(_savedRange);
@@ -428,20 +438,17 @@
         sel.addRange(r);
       }
     }
-
     function insertNodeAtCaret(node){
       const sel = window.getSelection();
       if(sel && sel.rangeCount && content.contains(sel.anchorNode)){
         const r = sel.getRangeAt(0);
         r.collapse(true);
         r.insertNode(node);
-        // 커서를 삽입한 노드 뒤로 이동
         r.setStartAfter(node);
         r.setEndAfter(node);
         sel.removeAllRanges();
         sel.addRange(r);
       }else{
-        // 선택이 없거나 본문 밖이면 끝에 추가
         content.appendChild(node);
         const r = document.createRange();
         r.setStartAfter(node);
@@ -452,26 +459,23 @@
       saveSoon();
     }
 
-    // ====== 성경 구절 삽입 (프롬프트 기반) ======
-    const verseDlg = $('#verseInsertDlg'); // 다이얼로그는 보조용으로 유지
-    document.getElementById('openVerseDlg').onclick = () => { saveCaret(); insertBiblePrompt(); }; // ← 프롬프트 사용
+    // ====== 성경 구절 삽입(프롬프트) ======
+    const verseDlg = $('#verseInsertDlg'); // 보조용
+    document.getElementById('openVerseDlg').onclick = () => { saveCaret(); insertBiblePrompt(); };
     $('#vCancel').addEventListener('click', (e)=>{ e.preventDefault(); verseDlg.close(); });
 
-    // 다이얼로그 경로도 유지 (원하면 사용)
+    // 보조 다이얼로그 경로도 유지
     $('#vInsert').addEventListener('click', (e)=>{
       e.preventDefault();
       const refStr = ($('#vref').value||'').trim();
       if(!refStr){ alert('구절을 입력하세요. 예: 창세기 1:1~2:3 / 요 4:24'); return; }
       if(!window.BIBLE){ alert('bible.json이 로드되지 않았습니다.'); return; }
-
       const parsed = parseRefLine(refStr);
       if(!parsed){ alert('구절 형식을 확인하세요. 예: 창세기 1:1~2:3 / 요 4:24'); return; }
-
       const verses = getVersesRangeFromBible(parsed);
       if(!verses.length){ alert('해당 범위에서 본문을 찾을 수 없습니다.'); return; }
 
-      const p = document.createElement('p');
-      p.innerHTML = `<span class="verse">${escapeHtml(verses.join(' '))}</span>`;
+      const p = buildVerseParagraph(parsed, verses);
       restoreCaret();
       insertNodeAtCaret(p);
 
@@ -502,7 +506,7 @@
       status('자동저장 대기 중…');
     })();
 
-    // ====== 설교 목록 (저장/불러오기/삭제/이름변경) ======
+    // ====== 설교 목록 ======
     const saveBtn=$('#save'); const saveNameEl=$('#saveName'); const listEl=$('#savedList');
     function savedMap(){ try{return JSON.parse(localStorage.getItem(SAVED_KEY)||'{}')}catch{return{}} }
     function setSavedMap(m){ localStorage.setItem(SAVED_KEY, JSON.stringify(m)); }
@@ -772,7 +776,7 @@
       return { book, start:{ch:ch1, vs:vs1}, end:{ch:ch2||ch1, vs:vs2||vs1} };
     }
 
-    // bible.json에서 범위 본문 모으기 (절 번호 포함: '1. 본문')
+    // bible.json에서 범위 본문 모으기 (절 번호 포함)
     function getVersesRangeFromBible(ref){
       const out = [];
       const B = window.BIBLE;
@@ -835,9 +839,9 @@
       return out.join(' ');
     }
 
-    // === 프롬프트 기반 성경 구절 삽입 ===
+    // === 성구삽입: 프롬프트 입력 → 기울임 + 주홍색 + <성경명 장:절(~장:절)> 표시 ===
     async function insertBiblePrompt(){
-      const raw = w.prompt('삽입할 성경구절 (예: 요 3:16, 창세기 1:1-3)');
+      const raw = w.prompt('삽입할 성경구절 (예: 요 3:16, 창세기 1:1-3, 시 23:1~3)');
       if(!raw) return;
       if(!w.BIBLE){ alert('bible.json이 로드되지 않았습니다.'); return; }
 
@@ -848,16 +852,30 @@
         .trim();
 
       const parsed = parseRefLine(norm);
-      if(!parsed){ alert('형식: 성경이름 장:절 또는 장:절-절 (예: 창세기 1:1-3 / 요 3:16)'); return; }
+      if(!parsed){ alert('형식: 성경이름 장:절 또는 장:절-절 (예: 창세기 1:1-3 / 요 3:16 / 시 23:1~3)'); return; }
 
       const verses = getVersesRangeFromBible(parsed);
       if(!verses.length){ alert('해당 범위에서 본문을 찾을 수 없습니다.'); return; }
 
       restoreCaret();
-      const p = document.createElement('p');
-      p.innerHTML = `<span class="verse">${escapeHtml(verses.join(' '))}</span>`;
+      const p = buildVerseParagraph(parsed, verses);
       insertNodeAtCaret(p);
       saveSoon();
+    }
+
+    // 공통: 삽입용 <p> 빌더 (기울임 .verse + <성경명 장:절(~장:절)>)
+    function buildVerseParagraph(parsed, versesArr){
+      const { book, start, end } = parsed;
+      const sameChapter = (start.ch === end.ch);
+      const rangeLabel = sameChapter
+        ? (start.vs === end.vs ? `${start.ch}:${start.vs}` : `${start.ch}:${start.vs}-${end.vs}`)
+        : `${start.ch}:${start.vs}~${end.ch}:${end.vs}`;
+
+      const p = document.createElement('p');
+      const verseHtml = escapeHtml(versesArr.join(' '));
+      const refHtml = `&lt;${book} ${rangeLabel}&gt;`;
+      p.innerHTML = `<span class="verse">${verseHtml}</span><span class="verse-ref">${refHtml}</span>`;
+      return p;
     }
 
     // ====== 드래프트 자동저장 보조 ======
@@ -952,7 +970,6 @@
 
     // ====== 본문 삽입 다이얼로그 ======
     const passageDlg = $('#passageDlg');
-    // (중복 onClick 제거됨) 상단 '성구삽입'은 프롬프트로 연결됨
     $('#dlgCancel').onclick = (e)=>{ e.preventDefault(); passageDlg.close(); };
     $('#dlgInsert').onclick = (e)=>{
       e.preventDefault();
