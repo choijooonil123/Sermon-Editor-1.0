@@ -258,29 +258,19 @@
     </form>
   </dialog>
 
-  <!-- 성경 구절 삽입 (최소형) -->
+  <!-- 성경 구절 삽입 -->
   <dialog id="verseInsertDlg">
-    <form method="dialog" class="card" style="min-width:min(480px, 90vw)">
-      <h3 style="margin:0 0 8px">성구 삽입</h3>
+    <form method="dialog" class="card" style="min-width:min(520px, 90vw)">
+      <h3 style="margin:0 0 8px">성경 구절 삽입</h3>
       <div class="field">
-        <label>성경 (예: 창세기, 요한복음)</label>
-        <input id="vbk" class="input" placeholder="예: 창세기" />
-      </div>
-      <div class="row" style="gap:8px">
-        <div class="field" style="flex:1">
-          <label>장</label>
-          <input id="vch" class="input" type="number" min="1" placeholder="예: 1" />
-        </div>
-        <div class="field" style="flex:1">
-          <label>절</label>
-          <input id="vvs" class="input" type="number" min="1" placeholder="예: 1" />
-        </div>
+        <label>구절 (예: 창세기 1:1 ~ 2:3  또는  요 4:24)</label>
+        <input id="vref" class="input" placeholder="예: 창세기 1:1~2:3 / 요 4:24" />
       </div>
       <div class="row" style="justify-content:flex-end; gap:6px; margin-top:10px">
         <button class="btn ghost" id="vCancel">취소</button>
         <button class="btn ok" id="vInsert">삽입</button>
       </div>
-      <div class="hint">※ bible.json 로딩이 필요합니다. (좌측 패널에서 자동/수동 로드)</div>
+      <div class="hint">bible.json은 시작 시 자동 로드됩니다. (현재 폴더)</div>
     </form>
   </dialog>
 
@@ -419,44 +409,32 @@
       }
     }
 
-    // ====== 성경 구절 삽입 (최소형) ======
+    // ====== 성경 구절 삽입(한 줄 입력: '성경 장:절~장:절' 또는 '성경 장:절') ======
     const verseDlg = $('#verseInsertDlg');
     $('#openVerseDlg').onclick = ()=> verseDlg.showModal();
-
     $('#vCancel').addEventListener('click', (e)=>{ e.preventDefault(); verseDlg.close(); });
 
     $('#vInsert').addEventListener('click', (e)=>{
       e.preventDefault();
+      const refStr = ($('#vref').value||'').trim();
+      if(!refStr){ alert('구절을 입력하세요. 예: 창세기 1:1~2:3 / 요 4:24'); return; }
+      if(!window.BIBLE){ alert('bible.json이 로드되지 않았습니다.'); return; }
 
-      const bookRaw = ($('#vbk').value || '').trim();
-      const chStr   = ($('#vch').value || '').trim();
-      const vsStr   = ($('#vvs').value || '').trim();
+      const parsed = parseRefLine(refStr);
+      if(!parsed){ alert('구절 형식을 확인하세요. 예: 창세기 1:1~2:3 / 요 4:24'); return; }
 
-      if(!bookRaw || !chStr || !vsStr){ alert('성경 / 장 / 절을 모두 입력하세요.'); return; }
-      if(!window.BIBLE){ alert('bible.json이 로드되지 않았습니다. 좌측 패널에서 불러오세요.'); return; }
+      const verses = getVersesRangeFromBible(parsed);
+      if(!verses.length){ alert('해당 범위에서 본문을 찾을 수 없습니다.'); return; }
 
-      const book = normalizeBook(bookRaw);
-      if(!book){ alert('해당 성경을 찾을 수 없습니다: ' + bookRaw); return; }
+      // 한 블록으로 연결해서 커서 위치에 삽입 (.verse 스타일)
+      const p = document.createElement('p');
+      p.innerHTML = `<span class="verse">${escapeHtml(verses.join(' '))}</span>`;
+      insertNodeAtCaret(p);
 
-      const chap  = String(parseInt(chStr,10));
-      const verse = String(parseInt(vsStr,10));
-
-      const text = window.BIBLE?.[book]?.[chap]?.[verse];
-      if(!text){ alert(`본문이 없습니다: ${book} ${chap}:${verse}`); return; }
-
-      // 커서 위치에 절 1개만 삽입 (.verse 스타일)
-      const span = document.createElement('span');
-      span.className = 'verse';
-      span.textContent = text;
-
-      insertNodeAtCaret(span);
       verseDlg.close();
-
-      // 입력 초기화
-      $('#vbk').value=''; $('#vch').value=''; $('#vvs').value='';
+      $('#vref').value='';
       saveSoon();
     });
-
 
     // ====== 자동저장 & 상태 ======
     let saveTimer=null; let lastSavedAt=null; let dirty=false;
@@ -726,6 +704,71 @@
       const hit = keys.find(k=>k.startsWith(name)); // 접두 일치(창 → 창세기)
       return hit || null;
     }
+
+    // '성경 장:절~장:절' 또는 '성경 장:절' 파서
+    function parseRefLine(str){
+      // 공백 정리
+      const s = String(str).replace(/\s+/g,' ').trim();
+
+      // 예: '창세기 1:1~2:3' / '요한복음 3:16' / '창 1:1-3' (하이픈도 허용)
+      const m = s.match(/^([^\d:]+)\s+(\d+):(\d+)\s*(?:[~\-]\s*(?:(\d+):)?(\d+))?\s*$/);
+      if(!m) return null;
+
+      const bookRaw = m[1].trim();
+      const ch1 = parseInt(m[2], 10);
+      const vs1 = parseInt(m[3], 10);
+      const ch2 = m[4] ? parseInt(m[4], 10) : null;   // 두 번째에 장이 있으면 교장 범위
+      const vs2 = m[5] ? parseInt(m[5], 10) : null;
+
+      const book = normalizeBook(bookRaw);
+      if(!book) return null;
+
+      // 끝 범위가 없으면 단일 절
+      if(!vs2 && !ch2){
+        return { book, start:{ch:ch1, vs:vs1}, end:{ch:ch1, vs:vs1} };
+      }
+      // 끝 장이 생략되었다면 같은 장 범위
+      if(!ch2 && vs2){
+        return { book, start:{ch:ch1, vs:vs1}, end:{ch:ch1, vs:vs2} };
+      }
+      // 교장 범위
+      return { book, start:{ch:ch1, vs:vs1}, end:{ch:ch2||ch1, vs:vs2||vs1} };
+    }
+
+    // bible.json에서 범위 본문 모으기 (절 번호 포함: '1. 본문')
+    function getVersesRangeFromBible(ref){
+      const out = [];
+      const B = window.BIBLE;
+      if(!B) return out;
+
+      const {book, start, end} = ref;
+      let ch = start.ch, vs = start.vs;
+
+      // 종료점 비교 함수
+      function beforeOrEq(a){ // a = {ch, vs}
+        if(a.ch < end.ch) return true;
+        if(a.ch === end.ch && a.vs <= end.vs) return true;
+        return false;
+      }
+
+      while(beforeOrEq({ch,vs})){
+        const chObj = B?.[book]?.[String(ch)];
+        if(!chObj) break;
+
+        const text = chObj[String(vs)];
+        if(text) out.push(`${vs}. ${text}`);
+
+        // 다음 절
+        vs++;
+        if(!chObj[String(vs)]){ // 다음 절 없음 → 다음 장 1절
+          ch++; vs = 1;
+          // 다음 장이 없으면 종료
+          if(!B?.[book]?.[String(ch)]) break;
+        }
+      }
+      return out;
+}
+
     function parseRef(str){
       if(!str) return null;
       const m = str.replace(/\s+/g,'').match(/^([^\d:]+)(\d+)(?::(\d+)(?:-(\d+))?)?$/);
