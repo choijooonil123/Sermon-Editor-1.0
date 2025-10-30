@@ -119,8 +119,20 @@
     .kbd{font-family:ui-monospace, Menlo, Consolas, monospace; padding:.1em .4em; border:1px solid var(--border); border-radius:6px}
 
     /* 현재 문장 하이라이트 */
-    #content .sent{transition:background .2s ease}
-    #content .sent.current{background:rgba(111,207,151,.22); border-radius:.25em}
+    #content .sent{
+      transition: background-color .15s ease, box-shadow .15s ease;
+      border-radius:.25em;
+    }
+    #content .sent.current{
+      background: rgba(255, 224, 102, .35); /* 눈에 잘 띄는 노란 하이라이트 */
+      box-shadow: 0 0 0 2px rgba(255, 224, 102, .55) inset;
+    }
+    /* 낭독 + ASR 동시 사용 시도 더 진하게 */
+    .asr-on #content .sent.current{
+      background: rgba(255, 224, 102, .45);
+      box-shadow: 0 0 0 2px rgba(255, 224, 102, .7) inset;
+    }
+
 
     /* 설교추적(음성) 상태/진행률 */
     .asr-on .badge, .asr-on #asrState{ color:#0a513a }
