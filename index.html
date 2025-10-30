@@ -258,7 +258,7 @@
     </form>
   </dialog>
 
-  <!-- 성경 구절 삽입 -->
+  <!-- 성경 구절 삽입 (다이얼로그는 남겨두되, 기본 동작은 프롬프트 기반) -->
   <dialog id="verseInsertDlg">
     <form method="dialog" class="card" style="min-width:min(520px, 90vw)">
       <h3 style="margin:0 0 8px">성경 구절 삽입</h3>
@@ -278,6 +278,7 @@
     // ====== 유틸 ======
     const $ = (sel,root=document)=>root.querySelector(sel);
     const $$ = (sel,root=document)=>Array.from(root.querySelectorAll(sel));
+    const w = window, d = document; // ← 추가 별칭
     const content = $('#content');
     const titleEl = $('#title');
     const statusEl = $('#status');
@@ -375,8 +376,8 @@
       placeFloatbar();
     };
 
-    // 플로팅에서 "구절 삽입" 열기
-    $('#fVerseInsertBtn').addEventListener('click', ()=> $('#verseInsertDlg').showModal());
+    // 플로팅에서 "구절 삽입" → 프롬프트 삽입
+    document.getElementById('fVerseInsertBtn')?.addEventListener('click', () => { saveCaret(); insertBiblePrompt(); });
 
     // ====== 블록 삽입 유틸 ======
     function insertPageBreak(){
@@ -451,11 +452,12 @@
       saveSoon();
     }
 
-    // ====== 성경 구절 삽입(한 줄 입력: '성경 장:절~장:절' 또는 '성경 장:절') ======
-    const verseDlg = $('#verseInsertDlg');
-    $('#openVerseDlg').onclick = ()=>{ saveCaret(); verseDlg.showModal(); };
+    // ====== 성경 구절 삽입 (프롬프트 기반) ======
+    const verseDlg = $('#verseInsertDlg'); // 다이얼로그는 보조용으로 유지
+    document.getElementById('openVerseDlg').onclick = () => { saveCaret(); insertBiblePrompt(); }; // ← 프롬프트 사용
     $('#vCancel').addEventListener('click', (e)=>{ e.preventDefault(); verseDlg.close(); });
 
+    // 다이얼로그 경로도 유지 (원하면 사용)
     $('#vInsert').addEventListener('click', (e)=>{
       e.preventDefault();
       const refStr = ($('#vref').value||'').trim();
@@ -468,10 +470,9 @@
       const verses = getVersesRangeFromBible(parsed);
       if(!verses.length){ alert('해당 범위에서 본문을 찾을 수 없습니다.'); return; }
 
-      // 한 블록으로 연결해서 커서 위치에 삽입 (.verse 스타일)
       const p = document.createElement('p');
       p.innerHTML = `<span class="verse">${escapeHtml(verses.join(' '))}</span>`;
-      restoreCaret();  // ← 이 줄을 삽입 로직 직전에 추가
+      restoreCaret();
       insertNodeAtCaret(p);
 
       verseDlg.close();
@@ -556,7 +557,6 @@
     const voiceSel = $('#voiceSel');
     const rate = $('#rate'); const rateVal = $('#rateVal');
 
-    // 음성 로드 대기 + 목록 구성
     function awaitVoices(timeout=1500){
       return new Promise(resolve=>{
         const vs = synth.getVoices();
@@ -750,31 +750,25 @@
 
     // '성경 장:절~장:절' 또는 '성경 장:절' 파서
     function parseRefLine(str){
-      // 공백 정리
       const s = String(str).replace(/\s+/g,' ').trim();
-
-      // 예: '창세기 1:1~2:3' / '요한복음 3:16' / '창 1:1-3' (하이픈도 허용)
       const m = s.match(/^([^\d:]+)\s+(\d+):(\d+)\s*(?:[~\-]\s*(?:(\d+):)?(\d+))?\s*$/);
       if(!m) return null;
 
       const bookRaw = m[1].trim();
       const ch1 = parseInt(m[2], 10);
       const vs1 = parseInt(m[3], 10);
-      const ch2 = m[4] ? parseInt(m[4], 10) : null;   // 두 번째에 장이 있으면 교장 범위
+      const ch2 = m[4] ? parseInt(m[4], 10) : null;
       const vs2 = m[5] ? parseInt(m[5], 10) : null;
 
       const book = normalizeBook(bookRaw);
       if(!book) return null;
 
-      // 끝 범위가 없으면 단일 절
       if(!vs2 && !ch2){
         return { book, start:{ch:ch1, vs:vs1}, end:{ch:ch1, vs:vs1} };
       }
-      // 끝 장이 생략되었다면 같은 장 범위
       if(!ch2 && vs2){
         return { book, start:{ch:ch1, vs:vs1}, end:{ch:ch1, vs:vs2} };
       }
-      // 교장 범위
       return { book, start:{ch:ch1, vs:vs1}, end:{ch:ch2||ch1, vs:vs2||vs1} };
     }
 
@@ -787,8 +781,7 @@
       const {book, start, end} = ref;
       let ch = start.ch, vs = start.vs;
 
-      // 종료점 비교 함수
-      function beforeOrEq(a){ // a = {ch, vs}
+      function beforeOrEq(a){
         if(a.ch < end.ch) return true;
         if(a.ch === end.ch && a.vs <= end.vs) return true;
         return false;
@@ -801,16 +794,14 @@
         const text = chObj[String(vs)];
         if(text) out.push(`${vs}. ${text}`);
 
-        // 다음 절
         vs++;
-        if(!chObj[String(vs)]){ // 다음 절 없음 → 다음 장 1절
+        if(!chObj[String(vs)]){
           ch++; vs = 1;
-          // 다음 장이 없으면 종료
           if(!B?.[book]?.[String(ch)]) break;
         }
       }
       return out;
-}
+    }
 
     function parseRef(str){
       if(!str) return null;
@@ -842,6 +833,31 @@
         out.push(opt.includeNum? `${i}. ${t}` : t);
       }
       return out.join(' ');
+    }
+
+    // === 프롬프트 기반 성경 구절 삽입 ===
+    async function insertBiblePrompt(){
+      const raw = w.prompt('삽입할 성경구절 (예: 요 3:16, 창세기 1:1-3)');
+      if(!raw) return;
+      if(!w.BIBLE){ alert('bible.json이 로드되지 않았습니다.'); return; }
+
+      const norm = String(raw)
+        .replace(/\s+/g, ' ')
+        .replace(/[–—－]/g, '-')
+        .replace(/[：]/g, ':')
+        .trim();
+
+      const parsed = parseRefLine(norm);
+      if(!parsed){ alert('형식: 성경이름 장:절 또는 장:절-절 (예: 창세기 1:1-3 / 요 3:16)'); return; }
+
+      const verses = getVersesRangeFromBible(parsed);
+      if(!verses.length){ alert('해당 범위에서 본문을 찾을 수 없습니다.'); return; }
+
+      restoreCaret();
+      const p = document.createElement('p');
+      p.innerHTML = `<span class="verse">${escapeHtml(verses.join(' '))}</span>`;
+      insertNodeAtCaret(p);
+      saveSoon();
     }
 
     // ====== 드래프트 자동저장 보조 ======
@@ -928,18 +944,15 @@
       const micBtn = $('#micToggle');
       if(micBtn){ micBtn.addEventListener('click', ()=>{ micOn ? stopMic() : startMic(); }); }
 
-      // 문장 이동 시 진행도 초기화
       const _origSpeak = speakCurrent;
       window.speakCurrent = function(){ updatePartialFill(0); partialText=''; _origSpeak(); };
 
-      // 편집 중 구조 변경되면 진행 표시 리셋
       content.addEventListener('input', ()=>{ if(micOn){ partialText=''; updatePartialFill(0); } });
     })();
 
     // ====== 본문 삽입 다이얼로그 ======
-    const passageDlg = $('#passageDlg'); // 필요시 계속 사용 가능
-    // 상단 '성구삽입' 버튼이 성경 구절 삽입 다이얼로그를 열도록 변경
-    $('#openVerseDlg').onclick = ()=> $('#verseInsertDlg').showModal();
+    const passageDlg = $('#passageDlg');
+    // (중복 onClick 제거됨) 상단 '성구삽입'은 프롬프트로 연결됨
     $('#dlgCancel').onclick = (e)=>{ e.preventDefault(); passageDlg.close(); };
     $('#dlgInsert').onclick = (e)=>{
       e.preventDefault();
@@ -963,7 +976,6 @@
     };
 
     function escapeHtml(s){return s.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;')}
-
   </script>
 </body>
 </html>
