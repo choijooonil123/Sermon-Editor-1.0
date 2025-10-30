@@ -88,6 +88,8 @@
     /* 성구 블록 간 여백 */
     .verse-block{ margin:.6em 0; }
 
+    /* 성구 한 줄씩 출력시 절행 스타일 */
+    .verse-line{ margin:.2em 0; }
 
     #content .mark{background:var(--mark-bg); padding:0 .15em; border-radius:.25em}
 
@@ -867,8 +869,6 @@
       insertNodeAtCaret(p);
       saveSoon();
     }
-
-    // 공통: 삽입용 <p> 빌더 (기울임 .verse + <성경명 장:절(~장:절)>)
     function buildVerseParagraph(parsed, versesArr){
       const { bookLabel, start, end } = parsed;
       const sameChapter = (start.ch === end.ch);
@@ -876,23 +876,28 @@
         ? (start.vs === end.vs ? `${start.ch}:${start.vs}` : `${start.ch}:${start.vs}-${end.vs}`)
         : `${start.ch}:${start.vs}~${end.ch}:${end.vs}`;
 
-      // <요 3:16> 같은 각괄호 표기 (HTML 엔티티 사용)
       const refHtml = `&lt;${escapeHtml(bookLabel)} ${rangeLabel}&gt;`;
-      const verseHtml = escapeHtml(versesArr.join(' '));
 
-      // caret 처리 상, 컨테이너 엘리먼트가 필요함 (DocumentFragment 사용 시 setStartAfter가 어려움)
+      // 컨테이너(div) 생성: 참조 1줄 + 각 절을 한 줄씩 <p>로
       const box = document.createElement('div');
       box.className = 'verse-block';
 
+      // 1) 참조 줄
       const pRef = document.createElement('p');
       pRef.innerHTML = `<span class="verse-ref">${refHtml}</span>`;
+      box.appendChild(pRef);
 
-      const pVerse = document.createElement('p');
-      pVerse.innerHTML = `<span class="verse">${verseHtml}</span>`;
+      // 2) 각 절을 한 줄씩
+      versesArr.forEach(line => {
+        const p = document.createElement('p');
+        p.className = 'verse-line';
+        p.innerHTML = `<span class="verse">${escapeHtml(line)}</span>`;
+        box.appendChild(p);
+      });
 
-      box.append(pRef, pVerse);
-      return box; // 컨테이너 하나를 caret 위치에 삽입
+      return box; // insertNodeAtCaret에 컨테이너 단위로 삽입
     }
+
 
 
     // ====== 드래프트 자동저장 보조 ======
