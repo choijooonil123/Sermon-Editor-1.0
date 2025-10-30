@@ -157,7 +157,7 @@
       <div class="card field">
         <label>한문장씩 낭독 · 설교 추적</label>
         <div class="row" style="gap:6px; flex-wrap:wrap">
-          <button class="btn" id="ttsToggle">▶︎ 재생</button>
+          <button class="btn" id="ttsToggle">▶︎ 낭독</button>
         </div>
         <div class="row" style="gap:8px; align-items:center">
           <label class="sub">음성</label>
@@ -665,7 +665,17 @@
       u.lang = (vv && vv.lang) ? vv.lang : 'ko-KR';
 
       u.rate = Number(rate.value)||1;
-      u.onend = ()=>{ if(autoplay){ next(); } };
+      u.onend = ()=>{
+        sentences.forEach(x=>x.classList.remove('current'));
+        if(autoplay && curIdx < sentences.length - 1){
+          curIdx++;
+          speakCurrent();   // 다음 문장 자동 재생
+        } else {
+          autoplay = false;
+          updateTtsBtn();  // 버튼을 ‘▶︎ 낭독’으로 복귀
+        }
+      };
+
       u.onerror = (e)=>{ autoplay=false; console.warn('TTS error', e); };
 
       try { synth.cancel(); } catch {}
@@ -686,12 +696,12 @@
       if(autoplay){
         stopAll(); // 정지
       }else{
-        startAt(curIdx||0); // 재생 시작
+        startAt(curIdx||0); // 낭독 시작
       }
     };
 
     function updateTtsBtn(){
-      $('#ttsToggle').textContent = autoplay ? '■ 정지' : '▶︎ 재생';
+      $('#ttsToggle').textContent = autoplay ? '■ 정지' : '▶︎ 낭독';
     }
 
     content.addEventListener('click', (e)=>{
@@ -700,8 +710,8 @@
       const idx = sentences.indexOf(sent);
       if(idx < 0) return;
       curIdx = idx;
-      autoplay = true;         // 클릭 즉시 재생 모드
-      speakCurrent();          // 해당 문장부터 재생
+      autoplay = true;
+      speakCurrent();      // 클릭한 문장부터 즉시 낭독
       updateTtsBtn();
     });
 
