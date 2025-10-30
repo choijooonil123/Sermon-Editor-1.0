@@ -158,9 +158,6 @@
         <label>한문장씩 낭독 · 설교 추적</label>
         <div class="row" style="gap:6px; flex-wrap:wrap">
           <button class="btn" id="ttsToggle">▶︎ 재생</button>
-          <button class="btn" id="ttsPrev">⟨ 이전</button>
-          <button class="btn" id="ttsNext">다음 ⟩</button>
-          <button class="btn danger" id="ttsStop">■ 정지</button>
         </div>
         <div class="row" style="gap:8px; align-items:center">
           <label class="sub">음성</label>
@@ -655,6 +652,7 @@
 
     function speakCurrent(){
       if(!sentences.length) return;
+      curIdx = Math.max(0, Math.min(curIdx, sentences.length - 1)); // 인덱스 보정
       const s = sentences[curIdx];
       sentences.forEach(x=>x.classList.remove('current'));
       s.classList.add('current'); s.scrollIntoView({behavior:'smooth', block:'center'});
@@ -683,21 +681,28 @@
     function prev(){ if(curIdx>0){ curIdx--; speakCurrent(); } }
 
     $('#ttsToggle').onclick = ()=>{
-      if(autoplay){ stopAll(); }
-      else {
-        wrapSentences();
-        if (!sentences.length){ alert('낭독할 문장이 없습니다. 본문을 입력하세요.'); return; }
-        startAt(curIdx||0);
+      wrapSentences();
+      if (!sentences.length){ alert('낭독할 문장이 없습니다. 본문을 입력하세요.'); return; }
+      if(autoplay){
+        stopAll(); // 정지
+      }else{
+        startAt(curIdx||0); // 재생 시작
       }
     };
-    $('#ttsNext').onclick = ()=> next();
-    $('#ttsPrev').onclick = ()=> prev();
-    $('#ttsStop').onclick = ()=> stopAll();
-    function updateTtsBtn(){ $('#ttsToggle').textContent = autoplay ? '⏸ 일시정지' : '▶︎ 재생'; }
+
+    function updateTtsBtn(){
+      $('#ttsToggle').textContent = autoplay ? '■ 정지' : '▶︎ 재생';
+    }
 
     content.addEventListener('click', (e)=>{
       const sent = e.target.closest('.sent');
-      if(sent){ const idx = sentences.indexOf(sent); if(idx>=0){ curIdx=idx; if(!autoplay) speakCurrent(); } }
+      if(!sent) return;
+      const idx = sentences.indexOf(sent);
+      if(idx < 0) return;
+      curIdx = idx;
+      autoplay = true;         // 클릭 즉시 재생 모드
+      speakCurrent();          // 해당 문장부터 재생
+      updateTtsBtn();
     });
 
     content.addEventListener('input', ()=>{ SENT_WRAPPED=false; sentences=[]; floatbar.hidden=true; });
@@ -984,10 +989,15 @@
       const micBtn = $('#micToggle');
       if(micBtn){ micBtn.addEventListener('click', ()=>{ micOn ? stopMic() : startMic(); }); }
 
-      const _origSpeak = speakCurrent;
-      window.speakCurrent = function(){ updatePartialFill(0); partialText=''; _origSpeak(); };
+    const _origSpeak = speakCurrent;
+    window.speakCurrent = function(){
+      curIdx = Math.max(0, Math.min(curIdx, sentences.length - 1));
+      updatePartialFill(0);
+      partialText='';
+      _origSpeak();
+    };
 
-      content.addEventListener('input', ()=>{ if(micOn){ partialText=''; updatePartialFill(0); } });
+    content.addEventListener('input', ()=>{ if(micOn){ partialText=''; updatePartialFill(0); } });
     })();
 
     // ====== 본문 삽입 다이얼로그 ======
