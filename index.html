@@ -400,18 +400,60 @@
       insertNodeAtCaret(details);
       saveSoon();
     }
+
+    // === caret save/restore ===
+    let _savedRange = null;
+
+    function saveCaret(){
+      const sel = window.getSelection();
+      if(sel && sel.rangeCount && content.contains(sel.anchorNode)){
+        _savedRange = sel.getRangeAt(0).cloneRange();
+      }else{
+        _savedRange = null;
+      }
+    }
+
+    function restoreCaret(){
+      const sel = window.getSelection();
+      // 저장된 커서가 있으면 복원, 없으면 본문 끝으로 커서 이동
+      if(_savedRange){
+        sel.removeAllRanges();
+        sel.addRange(_savedRange);
+      }else{
+        const r = document.createRange();
+        r.selectNodeContents(content);
+        r.collapse(false);
+        sel.removeAllRanges();
+        sel.addRange(r);
+      }
+    }
+
     function insertNodeAtCaret(node){
       const sel = window.getSelection();
-      if(sel && sel.rangeCount){
-        const r = sel.getRangeAt(0); r.collapse(true); r.insertNode(node);
+      if(sel && sel.rangeCount && content.contains(sel.anchorNode)){
+        const r = sel.getRangeAt(0);
+        r.collapse(true);
+        r.insertNode(node);
+        // 커서를 삽입한 노드 뒤로 이동
+        r.setStartAfter(node);
+        r.setEndAfter(node);
+        sel.removeAllRanges();
+        sel.addRange(r);
       }else{
+        // 선택이 없거나 본문 밖이면 끝에 추가
         content.appendChild(node);
+        const r = document.createRange();
+        r.setStartAfter(node);
+        r.setEndAfter(node);
+        sel.removeAllRanges();
+        sel.addRange(r);
       }
+      saveSoon();
     }
 
     // ====== 성경 구절 삽입(한 줄 입력: '성경 장:절~장:절' 또는 '성경 장:절') ======
     const verseDlg = $('#verseInsertDlg');
-    $('#openVerseDlg').onclick = ()=> verseDlg.showModal();
+    $('#openVerseDlg').onclick = ()=>{ saveCaret(); verseDlg.showModal(); };
     $('#vCancel').addEventListener('click', (e)=>{ e.preventDefault(); verseDlg.close(); });
 
     $('#vInsert').addEventListener('click', (e)=>{
@@ -429,6 +471,7 @@
       // 한 블록으로 연결해서 커서 위치에 삽입 (.verse 스타일)
       const p = document.createElement('p');
       p.innerHTML = `<span class="verse">${escapeHtml(verses.join(' '))}</span>`;
+      restoreCaret();  // ← 이 줄을 삽입 로직 직전에 추가
       insertNodeAtCaret(p);
 
       verseDlg.close();
